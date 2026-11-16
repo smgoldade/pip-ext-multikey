@@ -1,5 +1,5 @@
 // API key pools' browser module: the "API keys" button on the rail, the sheet in the menu, and the page. It lists
-// Pi's providers the way Menu → Providers does, and each provider holds its own pool of keys with its own mode.
+// Pi's providers the way Menu → Providers does, and each row opens in place to add keys and to set how they take turns.
 // The page never shows a key: the server sends a hint.
 
 /** The version of `pocket` this module was written for. */
@@ -44,13 +44,14 @@ function when(at, now) {
     return ahead ? `in ${words}` : `${words} ago`;
 }
 
-/** The models of a provider, as its row says them. */
-function modelCount(models) {
-    if (typeof models !== "number" || models <= 0) {
-        return "";
-    }
+/** What a provider row says under its name. */
+function about(provider) {
+    const models =
+        typeof provider.models === "number" && provider.models > 0
+            ? `${provider.models} model${provider.models === 1 ? "" : "s"}`
+            : "";
 
-    return `${models} model${models === 1 ? "" : "s"}`;
+    return [models, provider.id].filter((each) => each !== "").join(" · ");
 }
 
 export default function setup(pocket) {
@@ -59,15 +60,36 @@ export default function setup(pocket) {
     // The page's own styles, in the app's cascade layer (docs/extensions/browser-modules.md).
     pocket.style("style.css");
 
+    /** Why a pool key cannot go out for this provider, or how it goes out in place of Pi's own key. */
+    function signInNote(kind, inForce) {
+        if (kind === "oauth") {
+            return html`<div class="error-box">
+                Pi is signed in to this provider with a subscription, and sends that token. A key cannot take its
+                place: sign out of it in Menu → Providers to use the pool.
+            </div>`;
+        }
+
+        if (kind === undefined || kind === null) {
+            return null;
+        }
+
+        return html`<p class="muted small">
+            The pool's key goes out in place of Pi's own key${inForce ? ", which stays stored" : ""}. Menu →
+            Providers still shows the provider as signed in.
+        </p>`;
+    }
+
     function ApiKeys() {
         const [view, setView] = useState(null);
         const [error, setError] = useState(null);
         const [busy, setBusy] = useState(null);
         const [query, setQuery] = useState("");
-        // The provider whose pool shows, or `"new"` for the form that types a provider by hand.
+        /** The provider whose row is open, or `"new"` for the row that takes a provider by hand. */
         const [open, setOpen] = useState(null);
         const [name, setName] = useState("");
         const [secret, setSecret] = useState("");
+        /** The id typed in the "Another provider" row. */
+        const [otherId, setOtherId] = useState("");
 
         const show = (next) => {
             if (next !== undefined && next !== null) {
@@ -126,9 +148,7 @@ export default function setup(pocket) {
 
         const now = Date.now();
         const pools = new Map(view.providers.map((pool) => [pool.provider, pool]));
-        const signed = new Set(view.signedIn ?? []);
-
-        // Every provider that Pi lists, the ones it knows another way, and the ones with a pool already.
+        const signIns = view.signIns ?? {};
         const listed = new Map();
 
         for (const provider of view.catalog ?? []) {
@@ -162,19 +182,31 @@ export default function setup(pocket) {
                 "Signed in in Pi",
                 all.filter(
                     (provider) =>
-                        !pools.has(provider.id) && signed.has(provider.id) && match(provider),
+                        !pools.has(provider.id) &&
+                        signIns[provider.id] !== undefined &&
+                        match(provider),
                 ),
             ],
             [
                 "Other providers",
                 all.filter(
                     (provider) =>
-                        !pools.has(provider.id) && !signed.has(provider.id) && match(provider),
+                        !pools.has(provider.id) &&
+                        signIns[provider.id] === undefined &&
+                        match(provider),
                 ),
             ],
         ].filter(([, each]) => each.length > 0);
 
-        const addKey = (provider) => async (event) => {
+        /** Opens a row, and starts its form empty. */
+        const toggle = (provider) => {
+            setName("");
+            setSecret("");
+            setError(null);
+            setOpen((was) => (was === provider ? null : provider));
+        };
+
+        const add = (provider) => async (event) => {
             event.preventDefault();
 
             await act(`add ${provider}`, async () => {
@@ -182,21 +214,10 @@ export default function setup(pocket) {
 
                 setSecret("");
 
-                return next;
-            });
-        };
-
-        const addOther = async (event) => {
-            event.preventDefault();
-
-            const provider = open.id.trim().toLowerCase();
-
-            await act("add-other", async () => {
-                const next = await pocket.api("add", { provider, label: name, secret });
-
-                setName("");
-                setSecret("");
-                setOpen({ provider, id: provider });
+                // A provider typed by hand has a row of its own after this: its panel opens there.
+                if (open === "new") {
+                    setOpen(provider);
+                }
 
                 return next;
             });
@@ -276,31 +297,24 @@ export default function setup(pocket) {
             </div>
         </div>`;
 
-        const form = (provider, submit, label) => html`<form class="mk-form" onSubmit=${submit}>
-            <div class="mk-head">${label}</div>
-            <label class="mk-field">
-                <span class="small muted">Name for it</span>
-                <input
-                    class="mk-input"
-                    placeholder="Work"
-                    maxlength="40"
-                    value=${name}
-                    onInput=${(event) => setName(event.currentTarget.value)}
-                />
-            </label>
-            <label class="mk-field">
-                <span class="small muted">API key</span>
-                <input
-                    class="mk-input mono"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="sk-…"
-                    value=${secret}
-                    onInput=${(event) => setSecret(event.currentTarget.value)}
-                />
-            </label>
+        const keyForm = (provider) => html`<form class="mk-add" onSubmit=${add(provider)}>
+            <input
+                class="mk-input"
+                placeholder="Name for the key"
+                maxlength="40"
+                value=${name}
+                onInput=${(event) => setName(event.currentTarget.value)}
+            />
+            <input
+                class="mk-input mono"
+                type="password"
+                autocomplete="off"
+                placeholder="API key"
+                value=${secret}
+                onInput=${(event) => setSecret(event.currentTarget.value)}
+            />
             <button
-                class="button primary"
+                class="button primary small"
                 type="submit"
                 disabled=${busy !== null || name === "" || secret === "" || provider === ""}
             >
@@ -308,48 +322,16 @@ export default function setup(pocket) {
             </button>
         </form>`;
 
-        const detail = () => {
-            const pool = pools.get(open.provider);
-            const entry = listed.get(open.provider);
-            const title = entry?.name ?? open.provider;
+        /** What a row opens: its mode, its keys, the form for the next key, and the way to let the pool go. */
+        const panel = (provider) => {
+            const pool = pools.get(provider);
 
-            return html`<div class="mk-page">
-                <button class="button small ghost mk-back" onClick=${() => setOpen(null)}>
-                    ‹ All providers
-                </button>
-
-                <div class="mk-title">
-                    <span class="mk-title-name">${title}</span>
-                    <span class="mono small muted">${open.provider}</span>
-                </div>
-                <div class="muted small">
-                    ${modelCount(entry?.models)}
-                    ${modelCount(entry?.models) !== "" ? " · " : ""}
-                    ${signed.has(open.provider) ? "signed in in Pi" : "no sign-in in Pi"}
-                </div>
-
+            return html`<div class="mk-panel">
                 ${error !== null ? html`<div class="error-box">${error}</div>` : null}
-
-                ${
-                    signed.has(open.provider)
-                        ? html`<div class="error-box">
-                          Pi sends its own key for this provider before any key of the pool. Sign out of
-                          it in Menu → Providers to use these keys.
-                      </div>`
-                        : null
-                }
-
-                ${
-                    pool !== undefined && pool.inForce
-                        ? html`<p class="muted small">
-                          Menu → Providers lists this provider as signed in while a pool key is in
-                          force, and its Log out leaves the pool key in place: the keys are here.
-                      </p>`
-                        : null
-                }
+                ${signInNote(signIns[provider], pool?.inForce)}
 
                 <div class="mk-head">
-                    <span>Keys</span>
+                    <span>Keys${pool === undefined ? "" : ` · ${pool.keys.length}`}</span>
                     <span class="mk-modes">
                         ${["sequential", "balanced"].map(
                             (mode) =>
@@ -358,7 +340,7 @@ export default function setup(pocket) {
                                 disabled=${busy === "mode" + mode || pool === undefined}
                                 onClick=${() =>
                                     act("mode" + mode, () =>
-                                        pocket.api("mode", { provider: open.provider, mode }),
+                                        pocket.api("mode", { provider, mode }),
                                     )}
                             >
                                 ${mode}
@@ -369,7 +351,7 @@ export default function setup(pocket) {
                 <p class="muted small">
                     ${
                         pool === undefined
-                            ? "A pool needs a key first. Then choose how its keys take turns."
+                            ? "Add the first key. Then choose how its keys take turns: a key stays until its quota is gone (sequential), or each new session takes the one that carried the least (balanced)."
                             : pool.mode === "balanced"
                               ? `Each new session or subagent takes the key that carried the least (${
                                     view.settings.balance
@@ -379,16 +361,14 @@ export default function setup(pocket) {
                 </p>
 
                 ${(pool?.keys ?? []).map((key) => keyRow(pool, key))}
-
-                ${form(open.provider, addKey(open.provider), pool === undefined ? "Add the first key" : "Add another key")}
+                ${keyForm(provider)}
 
                 ${
                     pool !== undefined
                         ? html`<button
-                          class="button small"
+                          class="button small ghost"
                           disabled=${busy === "drop"}
-                          onClick=${() =>
-                              act("drop", () => pocket.api("drop", { provider: open.provider }))}
+                          onClick=${() => act("drop", () => pocket.api("drop", { provider }))}
                       >
                           Remove the pool
                       </button>`
@@ -397,40 +377,89 @@ export default function setup(pocket) {
             </div>`;
         };
 
-        if (open !== null) {
-            if (open.provider === "") {
-                return html`<div class="mk-page">
-                    <button class="button small ghost mk-back" onClick=${() => setOpen(null)}>
-                        ‹ All providers
-                    </button>
-                    <div class="mk-title">
-                        <span class="mk-title-name">Another provider</span>
-                    </div>
-                    <p class="muted small">
-                        The id Pi uses for it, in small letters: <span class="mono">anthropic</span>, <span class="mono">openrouter</span>, the id of
-                        an endpoint of your own.
-                    </p>
-                    <label class="mk-field">
-                        <span class="small muted">Provider</span>
-                        <input
-                            class="mk-input mono"
-                            placeholder="anthropic"
-                            value=${open.id}
-                            onInput=${(event) => setOpen({ provider: "", id: event.currentTarget.value })}
-                        />
-                    </label>
-                    ${error !== null ? html`<div class="error-box">${error}</div>` : null}
-                    ${form(open.id.trim().toLowerCase(), addOther, "Add a key")}
-                </div>`;
-            }
+        /** A row of the list: the provider, what it has, and whether its panel is open. */
+        const item = (provider) => {
+            const pool = pools.get(provider.id);
+            const isOpen = open === provider.id;
 
-            return detail();
-        }
+            return html`<div class="mk-entry" key=${provider.id}>
+                <button
+                    class="mk-item ${isOpen ? "open" : ""}"
+                    aria-expanded=${isOpen}
+                    onClick=${() => toggle(provider.id)}
+                >
+                    <span class="mk-item-info">
+                        <span class="mk-item-name">
+                            ${provider.name}
+                            ${
+                                signIns[provider.id] === "oauth"
+                                    ? html`<span class="mk-tag">subscription</span>`
+                                    : signIns[provider.id] !== undefined
+                                      ? html`<span class="mk-tag on">signed in</span>`
+                                      : null
+                            }
+                            ${
+                                pool !== undefined
+                                    ? html`<span class="mk-tag">
+                                      ${pool.keys.length} key${pool.keys.length === 1 ? "" : "s"}
+                                  </span>`
+                                    : null
+                            }
+                        </span>
+                        <span class="muted small">${about(provider)}</span>
+                    </span>
+                    <span class="mk-item-side">
+                        ${
+                            pool !== undefined
+                                ? html`<span class="muted small">${pool.mode}</span>`
+                                : null
+                        }
+                        <span class="mk-caret">${isOpen ? "▴" : "▾"}</span>
+                    </span>
+                </button>
+                ${isOpen ? panel(provider.id) : null}
+            </div>`;
+        };
+
+        const other = html`<div class="mk-entry">
+            <button
+                class="mk-item ${open === "new" ? "open" : ""}"
+                aria-expanded=${open === "new"}
+                onClick=${() => toggle("new")}
+            >
+                <span class="mk-item-info">
+                    <span class="mk-item-name">Another provider</span>
+                    <span class="muted small">an id Pi does not list, such as an endpoint of your own</span>
+                </span>
+                <span class="mk-item-side">
+                    <span class="mk-caret">${open === "new" ? "▴" : "▾"}</span>
+                </span>
+            </button>
+            ${
+                open === "new"
+                    ? html`<div class="mk-panel">
+                      ${error !== null ? html`<div class="error-box">${error}</div>` : null}
+                      <p class="muted small">
+                          The id that Pi uses for it, in small letters:
+                          <span class="mono">anthropic</span>, <span class="mono">openrouter</span>, or the id of an
+                          endpoint of your own.
+                      </p>
+                      <input
+                          class="mk-input mono"
+                          placeholder="provider"
+                          value=${otherId}
+                          onInput=${(event) => setOtherId(event.currentTarget.value.trim().toLowerCase())}
+                      />
+                      ${keyForm(otherId)}
+                  </div>`
+                    : null
+            }
+        </div>`;
 
         return html`<div class="mk-page">
             <p class="muted small">
-                Pi uses one key at a time for each provider, and each provider here has its own pool and
-                its own mode. The keys stay on this server, never in the browser.
+                Pi uses one key at a time for each provider. Every provider here has its own pool and its own mode, and
+                the keys stay on this server.
             </p>
 
             ${error !== null ? html`<div class="error-box">${error}</div>` : null}
@@ -446,76 +475,25 @@ export default function setup(pocket) {
             ${
                 groups.length === 0
                     ? html`<p class="muted small">
-                          ${
-                              query.trim() === ""
-                                  ? "Pi's list of providers has not arrived yet: it comes with Pi's next request. Use Another provider below."
-                                  : `No provider matches “${query}”.`
-                          }
-                      </p>`
+                      ${
+                          query.trim() === ""
+                              ? "Pi's list of providers has not arrived yet: it comes with Pi's next request."
+                              : `No provider matches “${query}”.`
+                      }
+                  </p>`
                     : groups.map(
                           ([title, rows]) => html`<div class="mk-group">
                           <div class="mk-group-title">${title}</div>
-                          ${rows.map((provider) => {
-                              const pool = pools.get(provider.id);
-
-                              return html`<button
-                                  class="mk-item"
-                                  onClick=${() => {
-                                      setName("");
-                                      setSecret("");
-                                      setOpen({ provider: provider.id, id: provider.id });
-                                  }}
-                              >
-                                  <span class="mk-item-info">
-                                      <span class="mk-item-name">
-                                          ${provider.name}
-                                          ${
-                                              signed.has(provider.id)
-                                                  ? html`<span class="mk-tag">signed in</span>`
-                                                  : null
-                                          }
-                                      </span>
-                                      <span class="muted small">
-                                          ${modelCount(provider.models)}
-                                          ${modelCount(provider.models) !== "" ? " · " : ""}
-                                          <span class="mono">${provider.id}</span>
-                                      </span>
-                                  </span>
-                                  <span class="mk-item-side">
-                                      ${
-                                          pool !== undefined
-                                              ? html`<span class="mk-tag on">
-                                                ${pool.keys.length} key${pool.keys.length === 1 ? "" : "s"}
-                                            </span>
-                                            <span class="muted small">${pool.mode}</span>`
-                                              : html`<span class="muted small">add keys</span>`
-                                      }
-                                  </span>
-                              </button>`;
-                          })}
+                          ${rows.map((provider) => item(provider))}
                       </div>`,
                       )
             }
 
-            <button
-                class="button small"
-                onClick=${() => {
-                    setName("");
-                    setSecret("");
-                    setOpen({ provider: "", id: "" });
-                }}
-            >
-                Another provider
-            </button>
+            ${other}
 
             <p class="muted small">
                 Timing and the balance metric are under Menu → Extensions. The keys are in
                 <span class="mono">multikey/keys.json</span> in Pi Pocket's data folder.
-                ${
-                    (view.catalog ?? []).length === 0
-                        ? " Pi's provider list arrives with its next request."
-                        : ""
-                }
             </p>
         </div>`;
     }

@@ -8,8 +8,11 @@ import createMultiKey from "../multikey.ts";
 /** What a module can be asked to do, as Pi Pocket would call it. */
 type Handlers = Record<string, (...args: unknown[]) => unknown>;
 
-/** A module on a folder of its own, with a host and a web part that keep what the module does. */
-async function harness(options: { signIns?: string[] } = {}) {
+/**
+ * A module on a folder of its own, with a host and a web part that keep what the module does. `signIns` are Pi's own
+ * sign-ins, by provider, with the kind of sign-in: `api_key` or `oauth`.
+ */
+async function harness(options: { signIns?: Record<string, string> } = {}) {
     const root = await mkdtemp(join(tmpdir(), "multikey-"));
     const dataDir = join(root, "data");
     const agentDir = join(root, "agent");
@@ -19,14 +22,21 @@ async function harness(options: { signIns?: string[] } = {}) {
 
     if (options.signIns !== undefined) {
         const signIns = Object.fromEntries(
-            options.signIns.map((provider) => [provider, { type: "api_key", key: "sk-stored" }]),
+            Object.entries(options.signIns).map(([provider, type]) => [
+                provider,
+                { type, key: "sk-stored" },
+            ]),
         );
 
         await writeFile(join(agentDir, "auth.json"), JSON.stringify(signIns), "utf8");
     }
 
     /** Every registration that Pi took, in order, and every one that the module gave back. */
-    const registered: { provider: string; apiKey: string }[] = [];
+    const registered: {
+        provider: string;
+        apiKey: string;
+        headers?: Record<string, string>;
+    }[] = [];
     const givenBack: string[] = [];
     const notices: { level: string; message: string }[] = [];
     const routes = new Map<string, (request: { body: Record<string, unknown> }) => unknown>();
@@ -41,8 +51,15 @@ async function harness(options: { signIns?: string[] } = {}) {
     const host = {
         dataDir,
         agentDir,
-        registerModelProvider(provider: string, config: { apiKey: string }) {
-            registered.push({ provider, apiKey: config.apiKey });
+        registerModelProvider(
+            provider: string,
+            config: { apiKey: string; headers?: Record<string, string> },
+        ) {
+            registered.push(
+                config.headers === undefined
+                    ? { provider, apiKey: config.apiKey }
+                    : { provider, apiKey: config.apiKey, headers: config.headers },
+            );
 
             return () => {
                 givenBack.push(config.apiKey);
@@ -81,11 +98,14 @@ async function harness(options: { signIns?: string[] } = {}) {
     const catalog: { id: string; name: string; getModels(): unknown[] }[] = [];
     const models = { getProviders: () => catalog };
 
-    /** One request of a conversation, in the order that Pi makes it: the request, then the provider it goes to. */
-    const request = async (conversationId: number, provider: string) => {
+    /**
+     * One request of a conversation, in the order that Pi makes it: the request, then the provider and its API, which
+     * the model names.
+     */
+    const request = async (conversationId: number, provider: string, api?: string) => {
         await handlers["beforeRequest"]?.({ messages: [] }, { conversationId, models }, {});
         await handlers["beforeProviderRequest"]?.(
-            { model: { provider } },
+            { model: { provider, api } },
             { conversationId, models },
             {},
         );
@@ -280,7 +300,7 @@ test("a pool comes back after a restart, with the key that was in force", async 
 });
 
 test("Pi's own sign-in for a provider is reported, so the page can warn", async () => {
-    const h = await harness({ signIns: ["anthropic"] });
+    const h = await harness({ signIns: { anthropic: "api_key" } });
 
     const view = await h.call("add", {
         provider: "anthropic",
@@ -364,7 +384,7 @@ test("the list of providers is kept for the next start, before any request", asy
 });
 
 test("a provider that Pi has a sign-in for is marked in the list", async () => {
-    const h = await harness({ signIns: ["anthropic"] });
+    const h = await harness({ signIns: { anthropic: "api_key" } });
 
     h.catalog.push({ id: "anthropic", name: "Anthropic", getModels: () => [1] });
     await h.request(1, "anthropic");
@@ -372,4 +392,69 @@ test("a provider that Pi has a sign-in for is marked in the list", async () => {
     const view = await h.state();
 
     assert.deepEqual(view.signedIn, ["anthropic"]);
+});
+
+test("a pool's key goes out in place of Pi's own API key", async () => {
+    const h = await harness({ signIns: { anthropic: "api_key" } });
+
+    h.catalog.push({
+        id: "anthropic",
+        name: "Anthropic",
+        getModels: () => [{ api: "anthropic-messages" }],
+    });
+
+    // A request teaches the module the API, and the API says which header carries a key.
+    await h.request(1, "anthropic", "anthropic-messages");
+
+    await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-11111111" });
+
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "anthropic",
+        apiKey: "sk-ant-one-11111111",
+        headers: { "x-api-key": "sk-ant-one-11111111" },
+    });
+});
+
+test("a provider of the OpenAI API gets a bearer header", async () => {
+    const h = await harness();
+
+    await h.request(1, "openai", "openai-completions");
+    await h.call("add", { provider: "openai", label: "One", secret: "sk-openai-one-1111" });
+
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "openai",
+        apiKey: "sk-openai-one-1111",
+        headers: { Authorization: "Bearer sk-openai-one-1111" },
+    });
+});
+
+test("a subscription sign-in is left alone, and the pool's key waits", async () => {
+    const h = await harness({ signIns: { anthropic: "oauth" } });
+
+    await h.request(1, "anthropic", "anthropic-messages");
+    await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-11111111" });
+
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "anthropic",
+        apiKey: "sk-ant-one-11111111",
+    });
+});
+
+test("a key registered before the API is known goes in without a header, and again with one", async () => {
+    const h = await harness();
+
+    await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-11111111" });
+
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "anthropic",
+        apiKey: "sk-ant-one-11111111",
+    });
+
+    await h.request(1, "anthropic", "anthropic-messages");
+
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "anthropic",
+        apiKey: "sk-ant-one-11111111",
+        headers: { "x-api-key": "sk-ant-one-11111111" },
+    });
 });

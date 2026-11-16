@@ -1,12 +1,22 @@
 # Changelog
 
+## 1.3.0
+
+- **A pool's key now goes out in place of Pi's own API key.** Pi resolves a stored sign-in before a registration, so
+  the registration carries the header that the provider's API reads its key from (measured against Pi's own runtime).
+  Pi's stored key stays where it is; Menu → Providers still shows the provider as signed in.
+- **A subscription sign-in is left alone.** A token for a plan is not an API key, so a pool stays idle for that
+  provider, and the page says why.
+- **Rows open in place, as in Menu → Providers**: a row shows the provider, its chips, and its mode, and opening it
+  gives the mode, the keys, the buttons, and the form that adds the next key. No second page.
+- The client's page is covered by tests that draw the list, a pool, the "another provider" row, and a subscription
+  sign-in.
+
 ## 1.2.0
 
 - **The page lists Pi's providers**, in the shape of Menu → Providers: a search field, and the groups "Your pools",
   "Signed in in Pi", and "Other providers", with each provider's name, model count, sign-in state, key count, and
   mode. A provider is picked from that list; typing an id by hand is now only the "Another provider" row at the end.
-- Each provider opens its own page: its keys, its actions, the form that adds the next key, and **its own mode**
-  (sequential or balanced) at the top.
 - Pi's provider list is read from the model runtime in a hook, and kept in `multikey/providers.json` for the next start.
 
 ## 1.1.0

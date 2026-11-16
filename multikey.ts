@@ -51,7 +51,10 @@ type NoticeLevel = "info" | "warning" | "error";
 type Host = {
     readonly dataDir: string;
     readonly agentDir: string;
-    registerModelProvider(provider: string, config: { apiKey: string }): () => void;
+    registerModelProvider(
+        provider: string,
+        config: { apiKey: string; headers?: Record<string, string> },
+    ): () => void;
     notice(level: NoticeLevel, message: string, conversationId?: number): void;
     hide?(value: { value: string; label: string }): () => void;
 };
@@ -108,8 +111,8 @@ type ProviderMessage = {
     };
 };
 
-/** One provider that Pi lists, as the page shows it: its name, and how many models it has. No key is here. */
-type CatalogEntry = { name: string; models: number };
+/** One provider that Pi lists: its name, how many models it has, and the API its models speak. No key is here. */
+type CatalogEntry = { name: string; models: number; api?: string };
 
 /** The settings of the module, under Menu → Extensions. */
 const SETTINGS: readonly SettingField[] = [
@@ -170,16 +173,16 @@ class Engine {
     #catalog: Record<string, CatalogEntry> = {};
     /** When Pi's list was last read: a hook can run often, and the list changes rarely. */
     #catalogAt = 0;
-    /** Provider → the registration in force, and the id of the key in it. */
-    readonly #inForce = new Map<string, { id: string; dispose: () => void }>();
+    /** Provider → the registration in force: the key in it, and the API that its header was chosen for. */
+    readonly #inForce = new Map<string, { id: string; api?: string; dispose: () => void }>();
     /** Conversation id → its provider, learned from the requests it made. */
     readonly #providers = new Map<number, string>();
     /** The provider that a request last came from, for a conversation that has none yet. */
     #last?: string;
     /** Secret → how to stop hiding it again. */
     readonly #hidden = new Map<string, () => void>();
-    /** Pi's own sign-ins by provider name, read at most a few seconds apart. */
-    #stored?: { at: number; providers: Set<string> };
+    /** Pi's own sign-ins: the provider, and what kind of sign-in it is. Never its key. Read a few seconds apart. */
+    #stored?: { at: number; types: Map<string, string> };
     /** Notices already sent, and when. */
     readonly #told = new Map<string, number>();
     #timer?: ReturnType<typeof setTimeout>;
@@ -225,6 +228,9 @@ class Engine {
                 delete this.#catalog[id];
             }
         }
+
+        // Read before the first registration: a subscription sign-in decides whether a header can go out.
+        await this.#signIns();
 
         for (const [provider, pool] of Object.entries(this.#state.providers)) {
             for (const key of pool.keys) {
@@ -276,22 +282,45 @@ class Engine {
             }
 
             let models = 0;
+            let api: string | undefined;
 
             try {
-                models = (provider.getAllModels?.() ?? provider.getModels?.() ?? []).length;
+                const list = provider.getAllModels?.() ?? provider.getModels?.() ?? [];
+
+                const first = (list[0] as { api?: unknown } | undefined)?.api;
+
+                models = list.length;
+                api = typeof first === "string" ? first : undefined;
             } catch {
                 models = 0;
             }
 
-            next[id] = { name: typeof provider.name === "string" ? provider.name : id, models };
+            next[id] = {
+                name: typeof provider.name === "string" ? provider.name : id,
+                models,
+                ...(typeof api === "string" ? { api } : {}),
+            };
         }
 
         if (Object.keys(next).length === 0) {
             return;
         }
 
+        const changed = Object.keys(next).some(
+            (provider) => this.#catalog[provider]?.api !== next[provider]?.api,
+        );
+
         this.#catalog = next;
         void this.#writeCatalog();
+
+        // A new API means another header: the pools of those providers are registered again.
+        if (changed) {
+            for (const provider of Object.keys(next)) {
+                if (this.#state.providers[provider] !== undefined) {
+                    this.#ensure(provider);
+                }
+            }
+        }
     }
 
     /** Writes Pi's list to its own file: a cache next to the pools, read at the next start. */
@@ -371,13 +400,17 @@ class Engine {
         }
     }
 
-    /** Pi's own sign-ins, by provider name only: the page warns that Pi sends those keys before a pool's. */
-    async #storedSignIns(): Promise<Set<string>> {
+    /**
+     * Pi's own sign-ins: which provider, and whether it is an API key or a subscription. The keys themselves are never
+     * read. A stored API key is what Pi sends before a registration, which the header below then overrides; a
+     * subscription token is left alone, because a key in its place would break it.
+     */
+    async #signIns(): Promise<Map<string, string>> {
         if (this.#stored !== undefined && Date.now() - this.#stored.at < 5000) {
-            return this.#stored.providers;
+            return this.#stored.types;
         }
 
-        const providers = new Set<string>();
+        const types = new Map<string, string>();
 
         try {
             const raw: unknown = JSON.parse(
@@ -385,17 +418,26 @@ class Engine {
             );
 
             if (typeof raw === "object" && raw !== null) {
-                for (const name of Object.keys(raw)) {
-                    providers.add(name);
+                for (const [provider, credential] of Object.entries(
+                    raw as Record<string, unknown>,
+                )) {
+                    const type = (credential as { type?: unknown } | null)?.type;
+
+                    types.set(provider, typeof type === "string" ? type : "api_key");
                 }
             }
         } catch {
-            // No file, or no key in it: nothing to warn about.
+            // No file, or nothing in it: no sign-in to read.
         }
 
-        this.#stored = { at: Date.now(), providers };
+        this.#stored = { at: Date.now(), types };
 
-        return providers;
+        return types;
+    }
+
+    /** The provider's sign-in kind, from the list read a moment ago, or undefined when it has none. */
+    #signInOf(provider: string): string | undefined {
+        return this.#stored?.types.get(provider);
     }
 
     /** Provider names to suggest in the page: the pools, the providers seen in requests, Pi's sign-ins, its catalogs. */
@@ -403,7 +445,7 @@ class Engine {
         const known = new Set<string>([
             ...Object.keys(this.#state.providers),
             ...this.#providers.values(),
-            ...(await this.#storedSignIns()),
+            ...(await this.#signIns()).keys(),
         ]);
 
         if (this.#last !== undefined) {
@@ -496,6 +538,7 @@ class Engine {
     #ensure(provider: string): void {
         const pool = this.#state.providers[provider];
         const existing = this.#inForce.get(provider);
+        const api = this.#catalog[provider]?.api;
         const wanted =
             pool === undefined || pool.keys.length === 0
                 ? undefined
@@ -510,16 +553,23 @@ class Engine {
             return;
         }
 
-        if (existing?.id === wanted.id) {
+        if (existing?.id === wanted.id && existing.api === api) {
             return;
         }
 
+        const headers = this.#headersFor(provider, api, wanted.secret);
+
         try {
             // Newest first: Pi then has this key, and removing the one before changes nothing.
-            const dispose = this.#host.registerModelProvider(provider, { apiKey: wanted.secret });
+            const dispose = this.#host.registerModelProvider(
+                provider,
+                headers === undefined
+                    ? { apiKey: wanted.secret }
+                    : { apiKey: wanted.secret, headers },
+            );
 
             existing?.dispose();
-            this.#inForce.set(provider, { id: wanted.id, dispose });
+            this.#inForce.set(provider, { id: wanted.id, api, dispose });
 
             if (pool.current !== wanted.id) {
                 pool.current = wanted.id;
@@ -532,14 +582,54 @@ class Engine {
         }
     }
 
-    /** Notes which provider a conversation talks to, from the request that it just made. */
-    learn(conversationId: number, provider: string | undefined): void {
+    /**
+     * The header that carries a key, chosen by the API that the provider's models speak. Pi resolves a stored sign-in
+     * before a registration, but a header of the registration goes over both: this is what puts a pool's key in place
+     * of the one that Pi has stored. A subscription sign-in is left alone, because a key in its place would break it.
+     */
+    #headersFor(
+        provider: string,
+        api: string | undefined,
+        secret: string,
+    ): Record<string, string> | undefined {
+        if (api === undefined || this.#signInOf(provider) === "oauth") {
+            return undefined;
+        }
+
+        switch (api) {
+            case "anthropic-messages":
+                return { "x-api-key": secret };
+            case "azure-openai-responses":
+                return { "api-key": secret };
+            case "google-generative-ai":
+            case "google-vertex":
+                return { "x-goog-api-key": secret };
+            default:
+                return { Authorization: `Bearer ${secret}` };
+        }
+    }
+
+    /** Notes which provider a conversation talks to, and in which API, from the request that it just made. */
+    learn(conversationId: number, provider: string | undefined, api?: string): void {
         if (typeof provider !== "string" || !PROVIDER.test(provider)) {
             return;
         }
 
         this.#providers.set(conversationId, provider);
         this.#last = provider;
+
+        const entry = this.#catalog[provider];
+
+        if (typeof api === "string" && entry?.api !== api) {
+            // The API is what picks the header that makes the pool's key the one that goes out.
+            this.#catalog[provider] = {
+                name: entry?.name ?? provider,
+                models: entry?.models ?? 0,
+                api,
+            };
+            void this.#writeCatalog();
+            this.#ensure(provider);
+        }
 
         if (this.#providers.size > 2000) {
             // Only a hint, so the oldest entry can go.
@@ -720,7 +810,7 @@ class Engine {
     /** What the page shows: the pools, and never a key itself. */
     async view(): Promise<unknown> {
         const now = Date.now();
-        const stored = await this.#storedSignIns();
+        const signIns = await this.#signIns();
 
         return {
             providers: Object.entries(this.#state.providers).map(([provider, pool]) => ({
@@ -728,7 +818,8 @@ class Engine {
                 mode: pool.mode,
                 current: pool.current ?? null,
                 inForce: this.#inForce.has(provider),
-                storedSignIn: stored.has(provider),
+                storedSignIn: signIns.has(provider),
+                signInKind: signIns.get(provider) ?? null,
                 keys: pool.keys.map((key) => ({
                     id: key.id,
                     label: key.label,
@@ -747,7 +838,8 @@ class Engine {
             catalog: Object.entries(this.#catalog)
                 .map(([id, entry]) => ({ id, name: entry.name, models: entry.models }))
                 .sort((left, right) => left.name.localeCompare(right.name)),
-            signedIn: [...stored].sort(),
+            signedIn: [...signIns.keys()].sort(),
+            signIns: Object.fromEntries(signIns),
             settings: {
                 balance: this.#metric(),
                 cooldown: this.#count("cooldown", 10),
@@ -1079,7 +1171,7 @@ export default async function createMultiKey(host: Host, web?: Web) {
                 beforeProviderRequest: (request, api) => {
                     const provider = request.model?.provider;
 
-                    engine.learn(api.conversationId, provider);
+                    engine.learn(api.conversationId, provider, request.model?.api);
                     engine.learnCatalog(api.models);
 
                     if (provider !== undefined) {

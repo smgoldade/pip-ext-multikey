@@ -70,8 +70,10 @@ The list has three groups, like Providers has its own:
 - **Signed in in Pi**: a provider that has a sign-in in Menu → Providers and no pool.
 - **Other providers**: everything else that Pi lists.
 
-A row also says a provider's model count, and its id. **Another provider** at the end takes an id that Pi does not
-list yet; a custom endpoint gets its id from Menu → Providers, under its OpenAI Compatible row.
+A row says a provider's model count and id, then **opens in place**, as a row in Providers opens its sign-in: the
+same row holds the pool's mode, its keys with their buttons, and the form that adds the next key. **Another
+provider** at the end works the same way, for an id that Pi does not list yet; a custom endpoint gets its id from
+Menu → Providers, under its OpenAI Compatible row.
 
 Pi's list arrives with Pi's next request: the module reads it from the model runtime, which it can reach only while
 a request runs. Until then the list holds the providers it learned another way (Pi's sign-ins and catalogs on disk),
@@ -146,19 +148,23 @@ Read these before you rely on a pool.
    each request started: each session's own key is put back before its next request, but a request that starts in the
    same instant as another session's switch may go out with the other key. In practice the mode holds; it is not a
    hard guarantee.
-2. **A key that Pi itself has stored wins.** If you signed in to a provider in **Menu → Providers** with an API key,
-   Pi sends that key before any that this module registers, and the pool does nothing for that provider. The page
-   says so when it sees one: sign out there, and the pool takes over. The module reads the provider _names_ in Pi's
-   `auth.json` for that warning, never a key.
-3. **Built-in providers and your own `models.json` endpoints keep their model list.** A provider that a _Pi extension_
+2. **A pool's key goes out in place of Pi's own API key, which stays stored.** Pi resolves a stored sign-in before
+   a registration, so the module adds the header that carries the key for the provider's API (`x-api-key`,
+   `Authorization`, or `x-goog-api-key`); a header of a registration goes over both. Menu → Providers still lists
+   the provider as signed in, and signing out there changes nothing while a pool key is in force. The module reads
+   the provider names and the _kind_ of sign-in in Pi's `auth.json`, never a key.
+3. **A subscription sign-in keeps its place.** When Pi is signed in to a provider with a subscription (an OAuth
+   token, such as Claude Pro/Max or a ChatGPT plan), its token is not an API key, and a key in its place would break
+   the requests. The pool stays idle for that provider, and the page says so: sign out there to use the pool.
+4. **Built-in providers and your own `models.json` endpoints keep their model list.** A provider that a _Pi extension_
    registers itself (a "native" provider) loses its model list as soon as a pool registers a key for it, because Pi
    drops a native provider when a configuration replaces it. Do not make a pool for one.
-4. **The first request after a restart** may use the key that was in force before it: the module learns which
+5. **The first request after a restart** may use the key that was in force before it: the module learns which
    provider a session talks to from that session's own requests. In balanced mode it then pins the session to that
    key, which is the key the request really used.
-5. **A key is stored in plain text** in `<data folder>/multikey/keys.json`. The file is mode 0600 and Pi Pocket's
+6. **A key is stored in plain text** in `<data folder>/multikey/keys.json`. The file is mode 0600 and Pi Pocket's
    data folder is private, but anyone who can read that folder can read the keys.
-6. **A key is not checked when you add it.** A wrong key shows up as a failed request, and is then retired as "the
+7. **A key is not checked when you add it.** A wrong key shows up as a failed request, and is then retired as "the
    provider refused this key".
 
 ## What it reads and writes
@@ -166,7 +172,7 @@ Read these before you rely on a pool.
 | Where                                             | What                                                 |
 | ------------------------------------------------- | ---------------------------------------------------- |
 | `<data folder>/multikey/keys.json`                | the pools, the keys themselves, the counters         |
-| `~/.pi/agent/auth.json`                           | the provider names only, for the warning above       |
+| `~/.pi/agent/auth.json`                           | the provider names and kinds only, never a key       |
 | `~/.pi/agent/models-store.json` and `models.json` | the provider names only, to suggest them in the page |
 
 It sends nothing anywhere. A key reaches only the provider, in the request that Pi builds, as any key does.
@@ -176,7 +182,11 @@ It sends nothing anywhere. A key reaches only the provider, in the request that 
 For Pi Pocket extension authors:
 
 - `host.registerModelProvider(provider, { apiKey })` _replaces the key of a provider_ and nothing else: with no
-  `baseUrl` and no `models`, Pi keeps the provider's catalog, endpoint, and API. That is the whole trick.
+  `baseUrl` and no `models`, Pi keeps the provider's catalog, endpoint, and API.
+- A stored sign-in still wins over the `apiKey` of a registration, so the registration also carries the header that
+  the provider's API reads its key from: `x-api-key` for `anthropic-messages`, `x-goog-api-key` for Google,
+  `api-key` for Azure, `Authorization: Bearer` for the rest. A registration's `headers` go over both. The API comes
+  from a request's model, or from the catalog read in a hook, and is kept in `multikey/providers.json`.
 - The newest registration is in force. A switch registers the new key and then gives the one before back, so the
   stack stays one deep and a reload never leaves two keys behind.
 - `hook(GenerationTask)`:
