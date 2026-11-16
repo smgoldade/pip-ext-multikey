@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+
+- **Pi's own keys show in the pool panel.** A provider that Menu → Providers signed in with an API key now shows a
+  \`Pi key sk-ant-…4f2c\` pill on its row, and the panel shows the key with a hint, plus **Take it into the pool**.
+- **Take it into the pool** copies Pi's key into the pool as \`From Pi\` and signs that provider out of Pi's own store
+  through Pi's own sign-out call, so one panel holds every key. A subscription sign-in is explained instead: it is not
+  a key, and the pool stays idle for it.
+- **A description that reads well in the Extensions sheet**: the module's first sentence is now "Keeps several API
+  keys for one provider, so a key that is spent, refused, or rate-limited never stops the work.", and the rest of the
+  first paragraph is a gallery description that says what it reads and writes. Author: **Steven Goldade**.
+
 ## 1.4.0
 
 - **The page now uses Menu → Providers' own layout**: the same search box, the same group headings with their counts,
@@ -8,8 +19,7 @@
 - A row's panel opens under it with the same tint and slide as a provider's sign-in in Providers, and holds the mode,
   the keys, the form for the next key, and Remove the pool. The Subagent models column is not there, as asked.
 - The page draws with Pi Pocket's classes for those parts (search, provider-group, sheet-list, provider,
-  provider-panel), so it follows the theme and the phone layout of the real sheet. This module's stylesheet now
-  covers only what is new: the pills, the key rows, and the form.
+  provider-panel), so it follows the theme and the phone layout of the real sheet.
 
 ## 1.3.0
 
@@ -18,23 +28,18 @@
   Pi's stored key stays where it is; Menu → Providers still shows the provider as signed in.
 - **A subscription sign-in is left alone.** A token for a plan is not an API key, so a pool stays idle for that
   provider, and the page says why.
-- **Rows open in place, as in Menu → Providers**: a row shows the provider, its chips, and its mode, and opening it
-  gives the mode, the keys, the buttons, and the form that adds the next key. No second page.
-- The client's page is covered by tests that draw the list, a pool, the "another provider" row, and a subscription
-  sign-in.
+- **Rows open in place, as in Menu → Providers**: no second page.
 
 ## 1.2.0
 
 - **The page lists Pi's providers**, in the shape of Menu → Providers: a search field, and the groups "Your pools",
-  "Signed in in Pi", and "Other providers", with each provider's name, model count, sign-in state, key count, and
-  mode. A provider is picked from that list; typing an id by hand is now only the "Another provider" row at the end.
-- Pi's provider list is read from the model runtime in a hook, and kept in `multikey/providers.json` for the next start.
+  "Signed in in Pi", and "Other providers". Pi's provider list is read from the model runtime in a hook, and kept in
+  `multikey/providers.json` for the next start.
 
 ## 1.1.0
 
 - **Menu → API key pools**: the pools open as a sheet from the menu, right under Pi's own Providers row. The rail
   button and the page are still there, with the same list.
-- Pi Pocket does not let a module add rows inside the Providers sheet itself; the README says what it allows instead.
 
 ## 1.0.0
 

@@ -394,6 +394,39 @@ test("a provider that Pi has a sign-in for is marked in the list", async () => {
     assert.deepEqual(view.signedIn, ["anthropic"]);
 });
 
+test("Pi's own key can be moved into the pool, and Pi is signed out for it", async () => {
+    const h = await harness({ signIns: { anthropic: "api_key" } });
+
+    const view = await h.call("take", { provider: "anthropic" });
+
+    // The key is Pi's own: "sk-stored" in the harness's auth.json.
+    assert.equal(view.providers[0]?.provider, "anthropic");
+    assert.equal(view.providers[0]?.keys[0]?.label, "From Pi");
+    assert.deepEqual(h.registered.at(-1), {
+        provider: "anthropic",
+        apiKey: "sk-stored",
+    });
+
+    const file = JSON.parse(await readFile(h.file, "utf8"));
+
+    assert.equal(file.providers.anthropic.keys[0].secret, "sk-stored");
+});
+
+test("a subscription is not a key to take, and a provider without a sign-in has none", async () => {
+    const h = await harness({ signIns: { anthropic: "oauth" } });
+
+    await assert.rejects(h.call("take", { provider: "anthropic" }), /subscription/u);
+    await assert.rejects(h.call("take", { provider: "openai" }), /no sign-in/u);
+});
+
+test("the page shows a hint of Pi's key, never the key", async () => {
+    const h = await harness({ signIns: { anthropic: "api_key" } });
+
+    const view = await h.state();
+
+    assert.deepEqual(view.signIns["anthropic"], { kind: "api_key", hint: "sk-…ored" });
+});
+
 test("a pool's key goes out in place of Pi's own API key", async () => {
     const h = await harness({ signIns: { anthropic: "api_key" } });
 

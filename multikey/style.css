@@ -25,6 +25,17 @@
     color: var(--accent);
 }
 
+/* Pi's own key for a provider, above the pool's keys: a hint of it, and the way to move it in. */
+.mk-pi {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px dashed var(--line-strong, var(--hair));
+    border-radius: var(--r-card, 10px);
+}
+
 .mk-head {
     display: flex;
     gap: 8px;

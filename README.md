@@ -1,16 +1,22 @@
 # pip-ext-multikey
 
-API key pools for [Pi Pocket](https://github.com/TannerMidd/pi-pocket): **several API keys for one provider**, used
-one at a time — either until one runs out, or spread across sessions.
+**Keeps several API keys for one provider, so a key that is spent, refused, or rate-limited never stops the work.**
+A [Pi Pocket](https://github.com/TannerMidd/pi-pocket) extension. By **Steven Goldade** —
+https://github.com/smgoldade/pip-ext-multikey
 
 Two keys for the same provider is common: a work account and a personal one, a key per billing account, or a key that
 is nearly out of credit beside a fresh one. Pi takes one key per provider, so without this module the only way to
 switch is to edit the key by hand and restart.
 
+> This paragraph is what the Extensions sheet shows (the module's first sentence), and the first paragraph of
+> `multikey.ts` is what a gallery entry publishes as its description. Both are written to stand alone.
+
 ## What it does
 
-- **Lists Pi's providers the way Menu → Providers does**: every provider with its name, its model count, a
-  `signed in` chip, its key count, and its mode, with a search field.
+- **Lists Pi's providers the way Menu → Providers does**: every provider with its name, its model count, a pill for
+  Pi's own key (`Pi key sk-ant-…4f2c`), its key count, and its mode, with a search field.
+- **Shows the keys Pi already has**, and moves them in: **Take it into the pool** copies the key that Menu →
+  Providers holds into the pool and signs that provider out of Pi's own store, so one panel holds every key.
 - **Add many keys for one provider**, each with a name of your own. Each provider has its own pool and its own mode.
 - **Sequential mode**: a key stays in force until the provider says its quota or credit is gone, then the next key
   takes over. You lose one aborted request, not the run: Pi retries, and the retry uses the new key.
@@ -25,8 +31,8 @@ switch is to edit the key by hand and restart.
 - **Says when it switches**, with a notice in the app.
 
 Keys are added, marked used up, reset, and removed in one place, which opens two ways: **Menu → API key pools**
-(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page). Tap a provider to see its
-keys, its mode, and the form that adds the next key.
+(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page). A row's button opens its
+panel, with the mode, the keys, Pi's own key, and the form that adds the next key.
 
 Pi Pocket does not let a module put rows inside **Menu → Providers**: that sheet is core, and a module can add menu
 rows, pages, sheets, panels, status items, and buttons, but not a section of a core sheet. The pools' sheet takes the
@@ -179,11 +185,11 @@ Read these before you rely on a pool.
 
 ## What it reads and writes
 
-| Where                                             | What                                                 |
-| ------------------------------------------------- | ---------------------------------------------------- |
-| `<data folder>/multikey/keys.json`                | the pools, the keys themselves, the counters         |
-| `~/.pi/agent/auth.json`                           | the provider names and kinds only, never a key       |
-| `~/.pi/agent/models-store.json` and `models.json` | the provider names only, to suggest them in the page |
+| Where                                             | What                                                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `<data folder>/multikey/keys.json`                | the pools, the keys themselves, the counters                                                  |
+| `~/.pi/agent/auth.json`                           | provider names and kinds; an API key's value, to show a hint of it and to move it into a pool |
+| `~/.pi/agent/models-store.json` and `models.json` | the provider names only, to suggest them in the page                                          |
 
 It sends nothing anywhere. A key reaches only the provider, in the request that Pi builds, as any key does.
 

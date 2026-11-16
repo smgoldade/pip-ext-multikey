@@ -121,7 +121,10 @@ const view = {
     ],
     known: ["opencode-go"],
     signedIn: ["anthropic", "openai"],
-    signIns: { anthropic: "api_key", openai: "oauth" },
+    signIns: {
+        anthropic: { kind: "api_key", hint: "sk-ant-…9999" },
+        openai: { kind: "oauth" },
+    },
     settings: { balance: "tokens", cooldown: 10, recover: 0, notify: true },
     at: 1,
 };
@@ -200,7 +203,20 @@ test("an open row draws its keys, its mode, and the form for the next key", () =
     assert.match(text, /rests in 1m/u);
     assert.match(text, /Add key/u);
     assert.match(text, /Remove the pool/u);
-    assert.match(text, /goes out in place of Pi's own key/u);
+    // Pi's own key shows as a hint, with the way to move it into the pool.
+    assert.match(text, /Pi's key/u);
+    assert.match(text, /sk-ant-…9999/u);
+    assert.match(text, /Take it into the pool/u);
+    assert.match(text, /goes out in its place/u);
+});
+
+test("the row shows a hint of Pi's key beside its other pills", () => {
+    const registered = run([view, null, null, "", null, "", "", ""]);
+    const text = String(registered["page"]?.[0]?.component());
+
+    assert.match(text, /Pi key/u);
+    assert.match(text, /sk-ant-…9999/u);
+    assert.match(text, /subscription/u);
 });
 
 test("the row that takes a provider by hand draws its form", () => {

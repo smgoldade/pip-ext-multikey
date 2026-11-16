@@ -1,7 +1,17 @@
 /**
- * API key pools: several API keys for one provider, used one at a time. In the sequential mode a key stays in force
- * until the provider says its quota is gone; in the balanced mode each new session or subagent gets the key that has
- * carried the least so far. Keys are added, marked used up, and balanced on the "API keys" page on the rail.
+ * Keeps several API keys for one provider, so a key that is spent, refused, or rate-limited never stops the work.
+ *
+ * Every provider in Menu → Providers gets a pool of its own: add keys with a name, see what each one carried (requests,
+ * tokens, cost), mark one used up or let it rest after a rate limit, and choose per provider whether its keys take
+ * turns one after another or spread the load across sessions and subagents. The page is laid out like Menu → Providers,
+ * and a pool's key goes out in place of the one Pi has stored; Pi's own key can be moved into the pool with one click.
+ *
+ * The keys stay in Pi Pocket's data folder (multikey/keys.json, mode 0600), and no browser ever receives one: the page
+ * shows a hint. The module reads the provider names and kinds in Pi's auth.json, and an API key there only to show that
+ * hint and to move the key into a pool. It sends nothing anywhere: a key reaches only its provider, in the request that
+ * Pi builds.
+ *
+ * By Steven Goldade — https://github.com/smgoldade/pip-ext-multikey
  */
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -114,6 +124,9 @@ type ProviderMessage = {
 /** One provider that Pi lists: its name, how many models it has, and the API its models speak. No key is here. */
 type CatalogEntry = { name: string; models: number; api?: string };
 
+/** Pi's own sign-in for a provider: an API key with its value and hint, or a subscription. */
+type SignIn = { kind: string; secret?: string; hint?: string };
+
 /** The settings of the module, under Menu → Extensions. */
 const SETTINGS: readonly SettingField[] = [
     {
@@ -181,8 +194,10 @@ class Engine {
     #last?: string;
     /** Secret → how to stop hiding it again. */
     readonly #hidden = new Map<string, () => void>();
-    /** Pi's own sign-ins: the provider, and what kind of sign-in it is. Never its key. Read a few seconds apart. */
-    #stored?: { at: number; types: Map<string, string> };
+    /** Pi's own sign-ins, read a few seconds apart: the provider, the kind, and an API key's own value. */
+    #stored?: { at: number; signs: Map<string, SignIn> };
+    /** Pi's model runtime, kept from the first hook that ran: its sign-in calls are Pi's own, not a file edit. */
+    #runtime?: { logout?(provider: string): Promise<void> };
     /** Notices already sent, and when. */
     readonly #told = new Map<string, number>();
     #timer?: ReturnType<typeof setTimeout>;
@@ -401,16 +416,16 @@ class Engine {
     }
 
     /**
-     * Pi's own sign-ins: which provider, and whether it is an API key or a subscription. The keys themselves are never
-     * read. A stored API key is what Pi sends before a registration, which the header below then overrides; a
-     * subscription token is left alone, because a key in its place would break it.
+     * Pi's own sign-ins: the provider, whether it is an API key or a subscription, and — for an API key — the key,
+     * which the page shows as a hint and "Take it into the pool" moves into a pool. A stored API key is what Pi sends
+     * before a registration, which the header below then overrides; a subscription token is left alone.
      */
-    async #signIns(): Promise<Map<string, string>> {
+    async #signIns(): Promise<Map<string, SignIn>> {
         if (this.#stored !== undefined && Date.now() - this.#stored.at < 5000) {
-            return this.#stored.types;
+            return this.#stored.signs;
         }
 
-        const types = new Map<string, string>();
+        const signs = new Map<string, SignIn>();
 
         try {
             const raw: unknown = JSON.parse(
@@ -421,23 +436,30 @@ class Engine {
                 for (const [provider, credential] of Object.entries(
                     raw as Record<string, unknown>,
                 )) {
-                    const type = (credential as { type?: unknown } | null)?.type;
+                    const sign = credential as { type?: unknown; key?: unknown } | null;
+                    const kind = typeof sign?.type === "string" ? sign.type : "api_key";
+                    const key = typeof sign?.key === "string" ? sign.key : undefined;
+                    // A key that starts with "!" is a command that Pi runs for it, not a key to copy.
+                    const secret = key !== undefined && !key.startsWith("!") ? key : undefined;
 
-                    types.set(provider, typeof type === "string" ? type : "api_key");
+                    signs.set(provider, {
+                        kind,
+                        ...(secret === undefined ? {} : { secret, hint: maskSecret(secret) }),
+                    });
                 }
             }
         } catch {
             // No file, or nothing in it: no sign-in to read.
         }
 
-        this.#stored = { at: Date.now(), types };
+        this.#stored = { at: Date.now(), signs };
 
-        return types;
+        return signs;
     }
 
     /** The provider's sign-in kind, from the list read a moment ago, or undefined when it has none. */
     #signInOf(provider: string): string | undefined {
-        return this.#stored?.types.get(provider);
+        return this.#stored?.signs.get(provider)?.kind;
     }
 
     /** Provider names to suggest in the page: the pools, the providers seen in requests, Pi's sign-ins, its catalogs. */
@@ -606,6 +628,22 @@ class Engine {
                 return { "x-goog-api-key": secret };
             default:
                 return { Authorization: `Bearer ${secret}` };
+        }
+    }
+
+    /**
+     * Keeps Pi's model runtime from a hook that ran. It is the only way to call Pi's own sign-in store — `logout`, for
+     * "Take it into the pool" — because a route gets no model runtime. The same object lasts as long as the server.
+     */
+    remember(models: unknown): void {
+        if (typeof models !== "object" || models === null) {
+            return;
+        }
+
+        const runtime = models as { logout?: unknown };
+
+        if (typeof runtime.logout === "function") {
+            this.#runtime = models as { logout(provider: string): Promise<void> };
         }
     }
 
@@ -819,7 +857,7 @@ class Engine {
                 current: pool.current ?? null,
                 inForce: this.#inForce.has(provider),
                 storedSignIn: signIns.has(provider),
-                signInKind: signIns.get(provider) ?? null,
+                signInKind: signIns.get(provider)?.kind ?? null,
                 keys: pool.keys.map((key) => ({
                     id: key.id,
                     label: key.label,
@@ -839,7 +877,15 @@ class Engine {
                 .map(([id, entry]) => ({ id, name: entry.name, models: entry.models }))
                 .sort((left, right) => left.name.localeCompare(right.name)),
             signedIn: [...signIns.keys()].sort(),
-            signIns: Object.fromEntries(signIns),
+            // The page shows a hint of Pi's key, never the key itself.
+            signIns: Object.fromEntries(
+                [...signIns].map(([provider, sign]) => [
+                    provider,
+                    sign.hint === undefined
+                        ? { kind: sign.kind }
+                        : { kind: sign.kind, hint: sign.hint },
+                ]),
+            ),
             settings: {
                 balance: this.#metric(),
                 cooldown: this.#count("cooldown", 10),
@@ -909,6 +955,68 @@ class Engine {
             pool.current = pickSequential(pool, Date.now())?.id ?? pool.keys[0]?.id;
         }
 
+        this.#ensure(provider);
+        await this.flush();
+        this.#web.send("changed");
+    }
+
+    /**
+     * Moves Pi's own key for a provider into the pool, and signs the provider out of Pi's store: from then on the pool
+     * is the one place its keys live. Both halves can be undone by hand — the key is a normal key of the pool, and
+     * Menu → Providers takes a new sign-in.
+     */
+    async take(provider: string): Promise<void> {
+        this.#stored = undefined;
+
+        const sign = (await this.#signIns()).get(provider);
+
+        if (sign === undefined) {
+            throw this.#web.error(404, `Pi has no sign-in for ${provider}.`);
+        }
+
+        if (sign.kind === "oauth") {
+            throw this.#web.error(
+                400,
+                `Pi's sign-in for ${provider} is a subscription, not a key. Sign out of it in Menu → Providers.`,
+            );
+        }
+
+        if (sign.secret === undefined) {
+            throw this.#web.error(
+                400,
+                `Pi's key for ${provider} comes from a command, so it cannot be copied. Add it to the pool by hand.`,
+            );
+        }
+
+        let pool = this.#state.providers[provider];
+
+        if (pool === undefined) {
+            pool = emptyPool();
+            this.#state.providers[provider] = pool;
+        }
+
+        if (!pool.keys.some((key) => key.secret === sign.secret)) {
+            const key = addKey(
+                this.#state,
+                pool,
+                { label: "From Pi", secret: sign.secret },
+                Date.now(),
+            );
+
+            this.#hide(key);
+        }
+
+        // Pi's own store forgets the key; the pool has it now, so nothing is lost.
+        try {
+            await this.#runtime?.logout?.(provider);
+        } catch (error) {
+            this.#host.notice(
+                "warning",
+                `API key pools: Pi kept its sign-in for ${provider}: ${tell(error)}. The pool's key still goes out first.`,
+            );
+        }
+
+        this.#stored = undefined;
         this.#ensure(provider);
         await this.flush();
         this.#web.send("changed");
@@ -1142,6 +1250,12 @@ export default async function createMultiKey(host: Host, web?: Web) {
         return engine.view();
     });
 
+    web.route("POST", "take", async (request) => {
+        await engine.take(checkProvider(web, request.body.provider));
+
+        return engine.view();
+    });
+
     web.route("POST", "reset", async (request) => {
         await engine.reset(
             checkProvider(web, request.body.provider),
@@ -1171,6 +1285,7 @@ export default async function createMultiKey(host: Host, web?: Web) {
                 beforeProviderRequest: (request, api) => {
                     const provider = request.model?.provider;
 
+                    engine.remember(api.models);
                     engine.learn(api.conversationId, provider, request.model?.api);
                     engine.learnCatalog(api.models);
 
@@ -1181,6 +1296,7 @@ export default async function createMultiKey(host: Host, web?: Web) {
                     return undefined;
                 },
                 afterResponse: (message, api) => {
+                    engine.remember(api.models);
                     engine.learnCatalog(api.models);
                     engine.observe(api.conversationId, message as ProviderMessage);
                 },

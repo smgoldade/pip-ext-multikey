@@ -60,23 +60,64 @@ export default function setup(pocket) {
     // The page's own styles, in the app's cascade layer (docs/extensions/browser-modules.md).
     pocket.style("style.css");
 
-    /** Why a pool key cannot go out for this provider, or how it goes out in place of Pi's own key. */
-    function signInNote(kind, inForce) {
-        if (kind === "oauth") {
+    /**
+     * Pi's own key for a provider, as the pool's page shows it: a hint of it, and the way to move it into the pool, so
+     * that one panel holds every key. A subscription is not a key, and is only explained.
+     */
+    function signInNote(provider, sign, inForce, confirm, setConfirm, busy, act) {
+        if (sign === undefined || sign === null) {
+            return null;
+        }
+
+        if (sign.kind === "oauth") {
             return html`<p class="muted small">
                 Pi is signed in to this provider with a subscription, and sends that token. A key cannot take its
                 place: sign out of it in Menu → Providers to use the pool.
             </p>`;
         }
 
-        if (kind === undefined || kind === null) {
-            return null;
-        }
+        const hint = sign.hint ?? "set by a command";
 
-        return html`<p class="muted small">
-            The pool's key goes out in place of Pi's own key${inForce ? ", which stays stored" : ""}. Menu →
-            Providers still shows the provider as signed in.
-        </p>`;
+        return html`<div class="mk-pi">
+            <div class="mk-line">
+                <span class="mk-name">
+                    Pi's key <span class="mono small muted">${hint}</span>
+                </span>
+                ${
+                    confirm === provider
+                        ? html`<span class="mk-actions">
+                          <button
+                              class="button small primary"
+                              disabled=${busy === "take"}
+                              onClick=${() =>
+                                  act("take", async () => {
+                                      const next = await pocket.api("take", { provider });
+
+                                      setConfirm(null);
+
+                                      return next;
+                                  })}
+                          >
+                              Move it, and sign out of Pi
+                          </button>
+                          <button class="button small ghost" onClick=${() => setConfirm(null)}>
+                              Cancel
+                          </button>
+                      </span>`
+                        : html`<button
+                          class="button small"
+                          disabled=${sign.hint === undefined}
+                          onClick=${() => setConfirm(provider)}
+                      >
+                          Take it into the pool
+                      </button>`
+                }
+            </div>
+            <div class="muted small">
+                Pi sends this key first, and the pool's key goes out in its place${inForce ? "" : " once the pool has one"}.
+                Taking it makes it a key of the pool, and signs the provider out of Pi's own store.
+            </div>
+        </div>`;
     }
 
     function ApiKeys() {
@@ -90,6 +131,8 @@ export default function setup(pocket) {
         const [secret, setSecret] = useState("");
         /** The id typed in the "Another provider" row. */
         const [otherId, setOtherId] = useState("");
+        /** The provider whose "Take it into the pool" is waiting for its yes. */
+        const [confirm, setConfirm] = useState(null);
 
         const show = (next) => {
             if (next !== undefined && next !== null) {
@@ -330,7 +373,15 @@ export default function setup(pocket) {
                 <div class="provider-panel-clip">
                     <div class="provider-panel-body">
                         ${error !== null ? html`<div class="error-box">${error}</div>` : null}
-                        ${signInNote(signIns[provider], pool?.inForce)}
+                        ${signInNote(
+                            provider,
+                            signIns[provider],
+                            pool?.inForce,
+                            confirm,
+                            setConfirm,
+                            busy,
+                            act,
+                        )}
 
                         <div class="mk-head">
                             <span>Keys${pool === undefined ? "" : ` · ${pool.keys.length}`}</span>
@@ -395,12 +446,12 @@ export default function setup(pocket) {
                             ${
                                 signIns[provider.id] === undefined
                                     ? null
-                                    : html`<span class="mk-pill">signed in</span>`
-                            }
-                            ${
-                                signIns[provider.id] === "oauth"
-                                    ? html`<span class="mk-pill">subscription</span>`
-                                    : null
+                                    : signIns[provider.id].kind === "oauth"
+                                      ? html`<span class="mk-pill">subscription</span>`
+                                      : html`<span class="mk-pill">
+                                            Pi key
+                                            <span class="mono">${signIns[provider.id].hint ?? ""}</span>
+                                        </span>`
                             }
                             ${
                                 pool === undefined

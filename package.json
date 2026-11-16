@@ -1,15 +1,21 @@
 {
     "name": "pip-ext-multikey",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "private": true,
-    "description": "API key pools for Pi Pocket: several API keys for one provider, used sequentially or balanced.",
-    "type": "module",
+    "description": "Keeps several API keys for one provider in Pi Pocket, so a key that is spent, refused, or rate-limited never stops the work.",
+    "author": "Steven Goldade",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/smgoldade/pip-ext-multikey.git"
+    },
+    "homepage": "https://github.com/smgoldade/pip-ext-multikey",
+    "type": "module",
     "keywords": [
         "pi-pocket",
-        "extension",
+        "pi-pocket-extension",
         "api-keys",
-        "rotation"
+        "key-rotation"
     ],
     "scripts": {
         "test": "node --test test/",
