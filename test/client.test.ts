@@ -133,16 +133,28 @@ test("the module registers a page, a sheet, a rail button, a menu row, and a lau
     const registered = run([view, null, null, "", null, "", "", ""]);
 
     assert.equal(pocketApi, 1);
-    assert.equal(registered["page"]?.[0]?.id, "keys");
     assert.equal(registered["sheet"]?.[0]?.id, "pools");
-    assert.equal(registered["rail"]?.[0]?.id, "keys");
     assert.equal(registered["menu"]?.[0]?.id, "pools");
+    assert.equal(registered["rail"]?.[0]?.id, "keys");
     assert.equal(registered["launcher"]?.[0]?.id, "keys");
+
+    // One screen, in a popup: there is no full page, and every way in opens the sheet.
+    assert.equal(registered["page"]?.length, 0);
+    assert.equal((registered["menu"]?.[0] as { sheet?: string }).sheet, "pools");
+    assert.equal((registered["rail"]?.[0] as { sheet?: string }).sheet, "pools");
+    assert.equal((registered["launcher"]?.[0] as { sheet?: string }).sheet, "pools");
+});
+
+test("the popup is wide, like the Providers sheet", () => {
+    const registered = run([view, null, null, "", null, "", "", ""]);
+
+    assert.equal((registered["sheet"]?.[0] as { wide?: boolean }).wide, true);
+    assert.equal((registered["sheet"]?.[0] as { title?: string }).title, "API key pools");
 });
 
 test("the list draws every group and the row of a pool", () => {
     const registered = run([view, null, null, "", null, "", "", ""]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /Your pools/u);
     assert.match(text, /Signed in in Pi/u);
@@ -155,7 +167,7 @@ test("the list draws every group and the row of a pool", () => {
 
 test("a row is the provider, its pills, and one button, as in Providers", () => {
     const registered = run([view, null, null, "", null, "", "", ""]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /provider-item/u);
     assert.match(text, /provider-info/u);
@@ -187,14 +199,14 @@ test("a provider that is not listed yet still fills the page", () => {
         "",
         "",
     ]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /has not arrived yet/u);
 });
 
 test("an open row draws its keys, its mode, and the form for the next key", () => {
     const registered = run([view, null, null, "", "anthropic", "", "", ""]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /Work/u);
     assert.match(text, /Home/u);
@@ -212,7 +224,7 @@ test("an open row draws its keys, its mode, and the form for the next key", () =
 
 test("the row shows a hint of Pi's key beside its other pills", () => {
     const registered = run([view, null, null, "", null, "", "", ""]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /Pi key/u);
     assert.match(text, /sk-ant-…9999/u);
@@ -221,7 +233,7 @@ test("the row shows a hint of Pi's key beside its other pills", () => {
 
 test("the row that takes a provider by hand draws its form", () => {
     const registered = run([view, null, null, "", "new", "", "", "openrouter"]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /endpoint of your own/u);
     assert.match(text, /Add key/u);
@@ -229,7 +241,7 @@ test("the row that takes a provider by hand draws its form", () => {
 
 test("a subscription sign-in is said to keep its place", () => {
     const registered = run([view, null, null, "", "openai", "", "", ""]);
-    const text = String(registered["page"]?.[0]?.component());
+    const text = String(registered["sheet"]?.[0]?.component());
 
     assert.match(text, /signed in to this provider with a subscription/u);
 });

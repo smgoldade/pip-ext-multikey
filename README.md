@@ -30,9 +30,10 @@ switch is to edit the key by hand and restart.
   is hidden from Pi and from the transcript.
 - **Says when it switches**, with a notice in the app.
 
-Keys are added, marked used up, reset, and removed in one place, which opens two ways: **Menu → API key pools**
-(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page). A row's button opens its
-panel, with the mode, the keys, Pi's own key, and the form that adds the next key.
+Keys are added, marked used up, reset, and removed in one place: a **popup**, the wide sheet that Menu → Providers
+opens. Three ways in — **Menu → API key pools** (right under Providers), the **API keys** button on the rail, and the
+launcher — all open it. A row's button opens its panel inside it, with the mode, the keys, Pi's own key, and the form
+that adds the next key.
 
 Pi Pocket does not let a module put rows inside **Menu → Providers**: that sheet is core, and a module can add menu
 rows, pages, sheets, panels, status items, and buttons, but not a section of a core sheet. The pools' sheet takes the
@@ -48,7 +49,7 @@ side: sign-in in Providers, keys in the pool.
     | --------------------- | ------------------------------------------------------------------------------- |
     | `multikey.ts`         | the module                                                                      |
     | `_multikey-policy.ts` | the rules it uses; the leading `_` keeps it from loading as a module of its own |
-    | `multikey/` (folder)  | the page: `index.js` and `style.css`                                            |
+    | `multikey/` (folder)  | the popup: `index.js` and `style.css`                                           |
 
     On macOS or Linux:
 
@@ -59,9 +60,9 @@ side: sign-in in Providers, keys in the pool.
     its module.
 
 2. Reload Pi Pocket in the browser, then turn on **API key pools** in **Menu → Extensions**. A drop-in starts off.
-3. Open **Menu → API key pools** (or the **API keys** button on the rail). The list shows the providers that Pi
-   knows: tap one, give the key a name, and paste the key. A provider that Pi does not list yet, such as an endpoint
-   of your own, comes from **Another provider** at the end.
+3. Open **Menu → API key pools**, tap **API keys** on the rail, or find it in the launcher: all three open the same
+   popup. It lists the providers that Pi knows. Open a provider's row, give the key a name, and paste the key. A
+   provider that Pi does not list yet, such as an endpoint of your own, comes from **Another provider** at the end.
 
 Nothing else is needed: Pi Pocket links its packages into the drop-in folder, and this module imports only
 `@earendil-works/pi-durable`.
@@ -76,7 +77,7 @@ The list has three groups, like Providers has its own:
 - **Signed in in Pi**: a provider that has a sign-in in Menu → Providers and no pool.
 - **Other providers**: everything else that Pi lists.
 
-The page is laid out like Menu → Providers, without its Subagent models column: the same search box, the same group
+The popup is laid out like Menu → Providers, without its Subagent models column: the same search box, the same group
 headings with their counts, and the same bordered list of rows. A row says the provider's name and its pills
 (`signed in`, `2 keys`, `balanced`), then its model count and id, and a button on the right — **Add key**, or
 **Keys** when it has a pool.
@@ -100,7 +101,7 @@ and the next start has the full list from before.
 A pool is all the keys of one provider. Adding the first key makes the pool, and puts that key in force at once, so
 the next message in any session uses it.
 
-Each provider has its own mode, set at the top of its page: **sequential** or **balanced**. It has no effect until
+Each provider has its own mode, set at the top of its panel: **sequential** or **balanced**. It has no effect until
 the pool has two keys.
 
 Each key row shows its name, a hint of the key, what it carried, and these buttons:
