@@ -1,22 +1,115 @@
-/* The page of the API key pools. Colours come from the theme, so the page follows Appearance. */
+/* The providers-and-pools page. Colours come from the theme, so the page follows Appearance, and the rows follow the
+   shape of Menu → Providers: a group title, then rows with a name and what the provider has. */
 
 .mk-page {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     max-width: 760px;
     padding: 12px;
 }
 
-.mk-form,
-.mk-card {
+.mk-back {
+    align-self: flex-start;
+}
+
+.mk-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.mk-title-name {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.mk-search {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.mk-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
+}
+
+.mk-group-title {
+    padding: 10px 2px 4px;
+    color: var(--muted);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.mk-item {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 10px 2px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.mk-item:hover {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+
+.mk-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.mk-item-name {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    font-weight: 500;
+}
+
+.mk-item-side {
+    display: flex;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+.mk-tag {
+    padding: 1px 7px;
     border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--card);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.mk-tag.on {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.mk-tag.bad {
+    border-color: var(--err);
+    color: var(--err);
+}
+
+.mk-tag.warn {
+    border-color: var(--warn);
+    color: var(--warn);
 }
 
 .mk-head {
@@ -25,21 +118,6 @@
     align-items: center;
     justify-content: space-between;
     font-weight: 600;
-}
-
-.mk-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.mk-input {
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
-    color: var(--text);
-    font: inherit;
 }
 
 .mk-modes {
@@ -55,6 +133,31 @@
     border-color: var(--accent);
     color: var(--accent);
     opacity: 1;
+}
+
+.mk-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--card);
+}
+
+.mk-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.mk-input {
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
 }
 
 .mk-row {
@@ -84,25 +187,6 @@
     gap: 6px;
     align-items: center;
     font-weight: 600;
-}
-
-.mk-chip {
-    padding: 1px 6px;
-    border: 1px solid var(--accent);
-    border-radius: 999px;
-    color: var(--accent);
-    font-size: 11px;
-    font-weight: 500;
-}
-
-.mk-chip.bad {
-    border-color: var(--err);
-    color: var(--err);
-}
-
-.mk-chip.warn {
-    border-color: var(--warn);
-    color: var(--warn);
 }
 
 .mk-actions {

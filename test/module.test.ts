@@ -77,15 +77,23 @@ async function harness(options: { signIns?: string[] } = {}) {
     };
     const handlers = extension?.hooks?.[0]?.handlers ?? {};
 
+    /** Pi's providers, as its model runtime lists them to a hook. A test sets these. */
+    const catalog: { id: string; name: string; getModels(): unknown[] }[] = [];
+    const models = { getProviders: () => catalog };
+
     /** One request of a conversation, in the order that Pi makes it: the request, then the provider it goes to. */
     const request = async (conversationId: number, provider: string) => {
-        await handlers["beforeRequest"]?.({ messages: [] }, { conversationId }, {});
-        await handlers["beforeProviderRequest"]?.({ model: { provider } }, { conversationId }, {});
+        await handlers["beforeRequest"]?.({ messages: [] }, { conversationId, models }, {});
+        await handlers["beforeProviderRequest"]?.(
+            { model: { provider } },
+            { conversationId, models },
+            {},
+        );
     };
 
     /** The terminal answer of the model, as the generation task reports it. */
     const answer = async (conversationId: number, message: Record<string, unknown>) => {
-        await handlers["afterResponse"]?.(message, { conversationId }, {});
+        await handlers["afterResponse"]?.(message, { conversationId, models }, {});
     };
 
     /** A route of the module, as the page calls it. */
@@ -107,12 +115,16 @@ async function harness(options: { signIns?: string[] } = {}) {
                     usage: { input: number };
                 }[];
             }[];
+            catalog: { id: string; name: string; models: number }[];
+            signedIn: string[];
+            known: string[];
         };
     };
 
     return {
         dataDir,
         agentDir,
+        catalog,
         registered,
         givenBack,
         notices,
@@ -316,4 +328,48 @@ test("a key, a name, and a provider are checked before anything is stored", asyn
     });
 
     assert.equal(view.providers[0]?.provider, "anthropic");
+});
+
+test("the page lists the providers that Pi reports, with their models", async () => {
+    const h = await harness();
+
+    h.catalog.push(
+        { id: "openrouter", name: "OpenRouter", getModels: () => [1] },
+        { id: "anthropic", name: "Anthropic", getModels: () => [1, 2, 3] },
+    );
+
+    // The list comes from a hook: only a request can see Pi's model runtime.
+    await h.request(1, "anthropic");
+
+    const view = await h.state();
+
+    assert.deepEqual(view.catalog, [
+        { id: "anthropic", name: "Anthropic", models: 3 },
+        { id: "openrouter", name: "OpenRouter", models: 1 },
+    ]);
+});
+
+test("the list of providers is kept for the next start, before any request", async () => {
+    const h = await harness();
+
+    h.catalog.push({ id: "anthropic", name: "Anthropic", getModels: () => [1, 2] });
+    await h.request(1, "anthropic");
+    await h.soak();
+
+    await h.start();
+
+    const view = await h.state();
+
+    assert.deepEqual(view.catalog, [{ id: "anthropic", name: "Anthropic", models: 2 }]);
+});
+
+test("a provider that Pi has a sign-in for is marked in the list", async () => {
+    const h = await harness({ signIns: ["anthropic"] });
+
+    h.catalog.push({ id: "anthropic", name: "Anthropic", getModels: () => [1] });
+    await h.request(1, "anthropic");
+
+    const view = await h.state();
+
+    assert.deepEqual(view.signedIn, ["anthropic"]);
 });

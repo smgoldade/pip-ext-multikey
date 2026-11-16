@@ -9,7 +9,9 @@ switch is to edit the key by hand and restart.
 
 ## What it does
 
-- **Add many keys for one provider**, each with a name of your own.
+- **Lists Pi's providers the way Menu → Providers does**: every provider with its name, its model count, a
+  `signed in` chip, its key count, and its mode, with a search field.
+- **Add many keys for one provider**, each with a name of your own. Each provider has its own pool and its own mode.
 - **Sequential mode**: a key stays in force until the provider says its quota or credit is gone, then the next key
   takes over. You lose one aborted request, not the run: Pi retries, and the retry uses the new key.
 - **Balanced mode**: each new session or subagent gets the key that has carried the least so far, and keeps it while
@@ -23,7 +25,8 @@ switch is to edit the key by hand and restart.
 - **Says when it switches**, with a notice in the app.
 
 Keys are added, marked used up, reset, and removed in one place, which opens two ways: **Menu → API key pools**
-(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page).
+(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page). Tap a provider to see its
+keys, its mode, and the form that adds the next key.
 
 Pi Pocket does not let a module put rows inside **Menu → Providers**: that sheet is core, and a module can add menu
 rows, pages, sheets, panels, status items, and buttons, but not a section of a core sheet. The pools' sheet takes the
@@ -50,19 +53,37 @@ side: sign-in in Providers, keys in the pool.
     its module.
 
 2. Reload Pi Pocket in the browser, then turn on **API key pools** in **Menu → Extensions**. A drop-in starts off.
-3. Open **Menu → API key pools** (or the **API keys** button on the rail). Type the provider as Pi knows it (`anthropic`, `openai`,
-   `openrouter`, `deepseek`, …), a name for the key, and the key itself. The provider field suggests the names that
-   Pi's own catalog, sign-ins, and endpoints know.
+3. Open **Menu → API key pools** (or the **API keys** button on the rail). The list shows the providers that Pi
+   knows: tap one, give the key a name, and paste the key. A provider that Pi does not list yet, such as an endpoint
+   of your own, comes from **Another provider** at the end.
 
 Nothing else is needed: Pi Pocket links its packages into the drop-in folder, and this module imports only
 `@earendil-works/pi-durable`.
 
 ## Using it
 
+### The list
+
+The list has three groups, like Providers has its own:
+
+- **Your pools**: the providers with keys. The row says how many keys, and the mode.
+- **Signed in in Pi**: a provider that has a sign-in in Menu → Providers and no pool.
+- **Other providers**: everything else that Pi lists.
+
+A row also says a provider's model count, and its id. **Another provider** at the end takes an id that Pi does not
+list yet; a custom endpoint gets its id from Menu → Providers, under its OpenAI Compatible row.
+
+Pi's list arrives with Pi's next request: the module reads it from the model runtime, which it can reach only while
+a request runs. Until then the list holds the providers it learned another way (Pi's sign-ins and catalogs on disk),
+and the next start has the full list from before.
+
 ### A pool
 
 A pool is all the keys of one provider. Adding the first key makes the pool, and puts that key in force at once, so
 the next message in any session uses it.
+
+Each provider has its own mode, set at the top of its page: **sequential** or **balanced**. It has no effect until
+the pool has two keys.
 
 Each key row shows its name, a hint of the key, what it carried, and these buttons:
 

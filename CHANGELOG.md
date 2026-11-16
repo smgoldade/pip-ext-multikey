@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0
+
+- **The page lists Pi's providers**, in the shape of Menu → Providers: a search field, and the groups "Your pools",
+  "Signed in in Pi", and "Other providers", with each provider's name, model count, sign-in state, key count, and
+  mode. A provider is picked from that list; typing an id by hand is now only the "Another provider" row at the end.
+- Each provider opens its own page: its keys, its actions, the form that adds the next key, and **its own mode**
+  (sequential or balanced) at the top.
+- Pi's provider list is read from the model runtime in a hook, and kept in `multikey/providers.json` for the next start.
+
 ## 1.1.0
 
 - **Menu → API key pools**: the pools open as a sheet from the menu, right under Pi's own Providers row. The rail

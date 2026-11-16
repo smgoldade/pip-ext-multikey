@@ -108,6 +108,9 @@ type ProviderMessage = {
     };
 };
 
+/** One provider that Pi lists, as the page shows it: its name, and how many models it has. No key is here. */
+type CatalogEntry = { name: string; models: number };
+
 /** The settings of the module, under Menu → Extensions. */
 const SETTINGS: readonly SettingField[] = [
     {
@@ -161,7 +164,12 @@ class Engine {
     readonly #host: Host;
     readonly #web: Web;
     readonly #file: string;
+    readonly #catalogFile: string;
     #state: State = emptyState();
+    /** The providers Pi last listed, learned while requests run: a hook is the only place that can see them. */
+    #catalog: Record<string, CatalogEntry> = {};
+    /** When Pi's list was last read: a hook can run often, and the list changes rarely. */
+    #catalogAt = 0;
     /** Provider → the registration in force, and the id of the key in it. */
     readonly #inForce = new Map<string, { id: string; dispose: () => void }>();
     /** Conversation id → its provider, learned from the requests it made. */
@@ -182,6 +190,7 @@ class Engine {
         this.#host = host;
         this.#web = web;
         this.#file = join(host.dataDir, FOLDER, FILE);
+        this.#catalogFile = join(host.dataDir, FOLDER, "providers.json");
     }
 
     /** The pools on disk, and the key in force for each of them. */
@@ -200,12 +209,101 @@ class Engine {
             }
         }
 
+        try {
+            const raw: unknown = JSON.parse(await readFile(this.#catalogFile, "utf8"));
+
+            if (typeof raw === "object" && raw !== null) {
+                this.#catalog = raw as Record<string, CatalogEntry>;
+            }
+        } catch {
+            // No list yet: it arrives with Pi's first request.
+        }
+
+        // A list from a version that kept a name of its own still sorts under the id it was made for.
+        for (const [id, entry] of Object.entries(this.#catalog)) {
+            if (typeof entry?.name !== "string" || typeof entry?.models !== "number") {
+                delete this.#catalog[id];
+            }
+        }
+
         for (const [provider, pool] of Object.entries(this.#state.providers)) {
             for (const key of pool.keys) {
                 this.#hide(key);
             }
 
             this.#ensure(provider);
+        }
+    }
+
+    /**
+     * Takes Pi's list of providers from a hook: the model runtime is the only part of Pi Pocket that can list them,
+     * and it is given to hooks alone. Read at most once a minute.
+     */
+    learnCatalog(models: unknown): void {
+        const now = Date.now();
+
+        if (now - this.#catalogAt < 60_000) {
+            return;
+        }
+
+        this.#catalogAt = now;
+
+        if (typeof models !== "object" || models === null) {
+            return;
+        }
+
+        const api = models as {
+            getProviders?: () => readonly {
+                id?: unknown;
+                name?: unknown;
+                getModels?: () => readonly unknown[];
+                getAllModels?: () => readonly unknown[];
+            }[];
+        };
+        const providers = api.getProviders?.();
+
+        if (!Array.isArray(providers)) {
+            return;
+        }
+
+        const next: Record<string, CatalogEntry> = {};
+
+        for (const provider of providers) {
+            const id = typeof provider?.id === "string" ? provider.id : "";
+
+            if (!PROVIDER.test(id)) {
+                continue;
+            }
+
+            let models = 0;
+
+            try {
+                models = (provider.getAllModels?.() ?? provider.getModels?.() ?? []).length;
+            } catch {
+                models = 0;
+            }
+
+            next[id] = { name: typeof provider.name === "string" ? provider.name : id, models };
+        }
+
+        if (Object.keys(next).length === 0) {
+            return;
+        }
+
+        this.#catalog = next;
+        void this.#writeCatalog();
+    }
+
+    /** Writes Pi's list to its own file: a cache next to the pools, read at the next start. */
+    async #writeCatalog(): Promise<void> {
+        const file = this.#catalogFile;
+        const temp = `${file}.tmp`;
+
+        try {
+            await writeFile(temp, JSON.stringify(this.#catalog, undefined, 2), "utf8");
+            await rename(temp, file);
+        } catch {
+            // A list that cannot be written costs one request at the next start, and nothing else.
         }
     }
 
@@ -646,6 +744,10 @@ class Engine {
                 })),
             })),
             known: await this.#known(),
+            catalog: Object.entries(this.#catalog)
+                .map(([id, entry]) => ({ id, name: entry.name, models: entry.models }))
+                .sort((left, right) => left.name.localeCompare(right.name)),
+            signedIn: [...stored].sort(),
             settings: {
                 balance: this.#metric(),
                 cooldown: this.#count("cooldown", 10),
@@ -978,6 +1080,7 @@ export default async function createMultiKey(host: Host, web?: Web) {
                     const provider = request.model?.provider;
 
                     engine.learn(api.conversationId, provider);
+                    engine.learnCatalog(api.models);
 
                     if (provider !== undefined) {
                         engine.turn(api.conversationId, provider);
@@ -986,6 +1089,7 @@ export default async function createMultiKey(host: Host, web?: Web) {
                     return undefined;
                 },
                 afterResponse: (message, api) => {
+                    engine.learnCatalog(api.models);
                     engine.observe(api.conversationId, message as ProviderMessage);
                 },
             }),
