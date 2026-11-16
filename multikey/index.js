@@ -224,6 +224,16 @@ export default function setup(pocket) {
                           }
 
                           ${
+                              pool.inForce
+                                  ? html`<p class="muted small">
+                                    Menu → Providers lists this provider as signed in while a pool key is
+                                    in force, and its Log out leaves the pool key in place: the keys are
+                                    here.
+                                </p>`
+                                  : null
+                          }
+
+                          ${
                               pool.storedSignIn
                                   ? html`<div class="error-box">
                                     Pi has a sign-in for <span class="mono">${pool.provider}</span> of its
