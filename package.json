@@ -1,0 +1,21 @@
+{
+    "name": "pip-ext-multikey",
+    "version": "1.0.0",
+    "private": true,
+    "description": "API key pools for Pi Pocket: several API keys for one provider, used sequentially or balanced.",
+    "type": "module",
+    "license": "MIT",
+    "keywords": [
+        "pi-pocket",
+        "extension",
+        "api-keys",
+        "rotation"
+    ],
+    "scripts": {
+        "test": "node --test test/",
+        "check": "tsc --noEmit --allowImportingTsExtensions --module nodenext --moduleResolution nodenext --target es2023 --strict --skipLibCheck multikey.ts _multikey-policy.ts"
+    },
+    "devDependencies": {
+        "typescript": "^5.7.2"
+    }
+}

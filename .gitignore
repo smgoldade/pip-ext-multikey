@@ -1,0 +1,8 @@
+# The link this repository uses to test against a Pi Pocket install, and its packages.
+node_modules/
+.pocket-packages/
+
+# Editor and OS noise.
+.DS_Store
+Thumbs.db
+*.log
