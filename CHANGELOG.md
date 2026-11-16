@@ -1,22 +1,26 @@
 # Changelog
 
+## 1.8.0
+
+**Balanced mode follows the real balance where a provider states one.**
+
+- Three providers answer a plain GET with what a key has left, and the module asks them: OpenRouter (the key's own
+  limit), DeepSeek (the account balance), and Moonshot/Kimi (available balance). The pool then balances on
+  `what is left per share`, not on its own meters.
+- A key that its provider says is empty is skipped for new work **without a mark**: topping the account up brings it
+  back by itself, with no "bring back" click.
+- Each key shows its balance and when it was read, with a **Refresh balance** button per pool. **Menu → Extensions**
+  sets how often the provider is asked (15 minutes by default; 0 asks only when you press Refresh).
+- A failed reading keeps the last one and says so; a provider with no endpoint (Anthropic, OpenAI, and the rest) is
+  never asked, and balances on the window and shares as before.
+- The balance is stored with the pool (`multikey/keys.json`), and the README now states exactly which addresses are
+  called.
+
 ## 1.7.0
 
-Balanced mode, rebuilt around what a quota really is.
-
-- **A window, not a lifetime.** A pool evens out what each key carried this month (or day, or its whole life): a
-  monthly quota that comes back is no longer weighed down by everything a key ever did.
-- **A share per key.** Weight = the window's spend ÷ the key's share, so a key with share 2 takes twice the work of
-  share 1. The panel shows the share beside what the key carried in the window, and changes it with one field.
-- **A margin.** The lightest key takes over only when it is lighter by the margin (25% by default), because a switch
-  costs the provider's prompt cache.
-- **Quiet switching.** The key in force never changes while another conversation of the same provider has a request in
-  flight, which removes the case where Pi sent a request with another session's key.
-- **Correct booking.** Usage is booked to the key that really carried the request, not to whatever key was in force
-  when the answer arrived.
-- **Cost first.** The metric is cost from Pi's own prices, and falls back to tokens for a model with no price.
-- Two settings more: the window, and the margin. A spinning key that is resting after a rate limit is skipped for new
-  conversations, not only for the run that hit it.
+Balanced mode, rebuilt around what a quota really is: a window (month/day/never) instead of a lifetime, a share per
+key, a margin before a switch, quiet switching (never while another request is in flight), usage booked to the key
+that carried the request, and cost as the default metric.
 
 ## 1.6.0
 
@@ -32,8 +36,7 @@ Balanced mode, rebuilt around what a quota really is.
 ## 1.4.0
 
 - **The page uses Menu → Providers' own layout**: the same search box, group headings, bordered rows, and a panel under
-  each row with **Add key** or **Keys** on the right.
-- The Subagent models column is not there.
+  each row with **Add key** or **Keys** on the right. The Subagent models column is not there.
 
 ## 1.3.0
 

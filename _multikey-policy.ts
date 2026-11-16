@@ -47,6 +47,13 @@ export type PoolKey = {
     share?: number;
     /** What it carried in the balance window, which rolls over. Absent in an older file. */
     spend?: KeySpend;
+    /**
+     * What the provider itself says the key has left, and when it said so. Only a provider with a probe reports one;
+     * for the rest, the module's own meters are all there is.
+     */
+    balance?: { remaining: number; unit: string; at: number };
+    /** Why the last reading failed, and when: a key keeps its last reading, and says that it may be old. */
+    balanceProblem?: { why: string; at: number };
     /** What it carried in all: the page's own numbers. */
     usage: KeyUsage;
 };
@@ -184,7 +191,24 @@ export function usable(key: PoolKey, now: number): boolean {
         return false;
     }
 
+    // Empty, but not spent: a prepaid account comes back when it is topped up, so this is no permanent mark.
+    if (typeof key.balance?.remaining === "number" && key.balance.remaining <= 0) {
+        return false;
+    }
+
     return !(typeof key.coolUntil === "number" && key.coolUntil > now);
+}
+
+/** The share a key should take: 1 when it says nothing, and never 0, which would divide by nothing. */
+export function shareOf(key: PoolKey): number {
+    return typeof key.share === "number" && key.share > 0 ? key.share : 1;
+}
+
+/** What a key has left, per share, when its provider says: higher is better. */
+export function headroom(key: PoolKey): number | undefined {
+    const remaining = key.balance?.remaining;
+
+    return remaining === undefined ? undefined : remaining / shareOf(key);
 }
 
 /**
@@ -301,14 +325,43 @@ export function soonestResting(pool: Pool, now: number): PoolKey | undefined {
 export function pickBalanced(pool: Pool, now: number, plan: BalancePlan): PoolKey | undefined {
     const period = periodId(plan.window, now);
     const metric = effectiveMetric(pool.keys, period, plan.metric);
-    const ranked = usableKeys(pool, now).sort(
-        (left, right) =>
-            weight(left, period, metric) - weight(right, period, metric) ||
-            left.usage.lastAt - right.usage.lastAt ||
-            left.addedAt - right.addedAt,
+    const ranked = usableKeys(pool, now).sort((left, right) =>
+        compare(left, right, period, metric),
     );
 
     return ranked[0] ?? soonestResting(pool, now);
+}
+
+/**
+ * Which of two keys a balanced pool wants: the one with more left per share when the provider reports a balance, and
+ * the one that carried less when it does not. A key with a reading comes before one without.
+ */
+export function compare(
+    left: PoolKey,
+    right: PoolKey,
+    period: string,
+    metric: BalanceMetric,
+): number {
+    const one = headroom(left);
+    const two = headroom(right);
+
+    if (one !== undefined && two !== undefined) {
+        const byHeadroom = two - one;
+
+        if (byHeadroom !== 0) {
+            return byHeadroom;
+        }
+    } else if (one !== undefined) {
+        return -1;
+    } else if (two !== undefined) {
+        return 1;
+    }
+
+    return (
+        weight(left, period, metric) - weight(right, period, metric) ||
+        left.usage.lastAt - right.usage.lastAt ||
+        left.addedAt - right.addedAt
+    );
 }
 
 /**
@@ -333,12 +386,20 @@ export function steadyKey(
         return best;
     }
 
+    const one = headroom(current);
+    const two = headroom(best);
+
+    if (one !== undefined && two !== undefined) {
+        // With real balances, the question is whether the other key has enough more to be worth the switch.
+        return two <= one * (1 + plan.margin) ? current : best;
+    }
+
     const period = periodId(plan.window, now);
     const metric = effectiveMetric(pool.keys, period, plan.metric);
-    const now_ = weight(current, period, metric);
-    const next = weight(best, period, metric);
+    const spentNow = weight(current, period, metric);
+    const spentNext = weight(best, period, metric);
 
-    return next >= now_ * (1 - plan.margin) ? current : best;
+    return spentNext >= spentNow * (1 - plan.margin) ? current : best;
 }
 
 /**
@@ -501,6 +562,11 @@ function count(value: unknown, fallback = 0): number {
     return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+/** A figure that the state file can hold, also a negative one: an account can be overdrawn. */
+function figure(value: unknown): number | undefined {
+    return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 /** A text that the state file can hold, or the fallback. */
 function text(value: unknown, fallback = ""): string {
     return typeof value === "string" ? value : fallback;
@@ -540,6 +606,22 @@ function keyFrom(value: unknown): PoolKey | undefined {
         usedUpReason: typeof raw.usedUpReason === "string" ? raw.usedUpReason : undefined,
         coolUntil: typeof raw.coolUntil === "number" ? count(raw.coolUntil) : undefined,
         share: share >= 1 && share <= 100 ? share : 1,
+        ...(typeof raw.balance === "object" && raw.balance !== null
+            ? (() => {
+                  const balance = raw.balance as Record<string, unknown>;
+                  const remaining = figure(balance["remaining"]);
+
+                  return remaining === undefined
+                      ? {}
+                      : {
+                            balance: {
+                                remaining,
+                                unit: text(balance["unit"]),
+                                at: count(balance["at"]),
+                            },
+                        };
+              })()
+            : {}),
         spend: {
             period: text(spend.period),
             requests: count(spend.requests),

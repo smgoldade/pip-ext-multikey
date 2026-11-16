@@ -44,6 +44,16 @@ function when(at, now) {
     return ahead ? `in ${words}` : `${words} ago`;
 }
 
+/** A key's balance, as the provider stated it, and when it did. */
+function balanceText(balance, now) {
+    const unit = balance.unit === "" ? "" : ` ${balance.unit}`;
+    const value = Number.isInteger(balance.remaining)
+        ? String(balance.remaining)
+        : balance.remaining.toFixed(2);
+
+    return `${value}${unit} left · checked ${when(balance.at, now)}`;
+}
+
 /** The balance window, as a word for a sentence: a month, a day, or the whole life of the key. */
 function periodWord(period) {
     return period === "day" ? "day" : period === "never" ? "whole life" : "month";
@@ -290,6 +300,22 @@ export default function setup(pocket) {
                 </span>
                 <span class="mono small muted">${key.hint}</span>
             </div>
+            ${
+                key.balance !== null && key.balance !== undefined
+                    ? html`<div class="muted small">
+                      ${balanceText(key.balance, now)}
+                      ${
+                          key.balanceProblem !== null && key.balanceProblem !== undefined
+                              ? " · the last check failed"
+                              : ""
+                      }
+                  </div>`
+                    : key.balanceProblem !== null && key.balanceProblem !== undefined
+                      ? html`<div class="muted small">
+                        No balance read: ${key.balanceProblem.why}
+                    </div>`
+                      : null
+            }
             <div class="muted small">
                 ${key.usage.requests} requests ·
                 ${tokens(
@@ -449,6 +475,25 @@ export default function setup(pocket) {
                                       : "A key stays in use until the provider says its quota is gone, then the next key takes over."
                             }
                         </p>
+
+                        ${
+                            pool?.probe === true
+                                ? html`<p class="muted small">
+                                  ${
+                                      pool.keys.some((key) => (key.balance ?? null) !== null)
+                                          ? "The pool balances on what each key has left, as the provider states it. "
+                                          : "This provider states what a key has left. "
+                                  }
+                                  <button
+                                      class="button small"
+                                      disabled=${busy === "check"}
+                                      onClick=${() => act("check", () => pocket.api("check", { provider }))}
+                                  >
+                                      Refresh balance
+                                  </button>
+                              </p>`
+                                : null
+                        }
 
                         ${(pool?.keys ?? []).map((key) => keyRow(pool, key))}
                         ${keyForm(provider)}

@@ -69,6 +69,7 @@ const view = {
         {
             provider: "anthropic",
             mode: "balanced",
+            probe: true,
             current: "k2",
             inForce: true,
             storedSignIn: true,
@@ -94,6 +95,8 @@ const view = {
                     },
                     share: 2,
                     spent: { period: "2026-11", requests: 2, tokens: 1500, cost: 0.02 },
+                    balance: { remaining: 4.5, unit: "credits", at: Date.now() - 120_000 },
+                    balanceProblem: null,
                 },
                 {
                     id: "k2",
@@ -115,6 +118,8 @@ const view = {
                     },
                     share: 1,
                     spent: { period: "2026-11", requests: 1, tokens: 12, cost: 0 },
+                    balance: null,
+                    balanceProblem: null,
                 },
             ],
         },
@@ -236,6 +241,10 @@ test("an open row draws its keys, its mode, and the form for the next key", () =
     assert.match(text, /this month/u);
     assert.match(text, /1\.5k tokens/u);
     assert.match(text, /lighter by 25%/u);
+    // What the provider says the key has left, and the way to ask again.
+    assert.match(text, /4\.50 credits left/u);
+    assert.match(text, /Refresh balance/u);
+    assert.match(text, /balances on what each key has left/u);
 });
 
 test("the row shows a hint of Pi's key beside its other pills", () => {

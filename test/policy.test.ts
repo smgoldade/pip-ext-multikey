@@ -340,3 +340,57 @@ test("a file that is not a file of pools gives an empty state", () => {
     assert.deepEqual(normalizeState("junk"), emptyState());
     assert.deepEqual(normalizeState({ providers: 7 }), emptyState());
 });
+
+test("with real balances, the key with the most left per share goes first", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    keys[0]!.balance = { remaining: 5, unit: "credits", at: 1 };
+    keys[1]!.balance = { remaining: 20, unit: "credits", at: 1 };
+
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
+
+    // A bigger share wants more headroom before it counts as the lighter key.
+    keys[1]!.share = 8;
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k1");
+});
+
+test("a key that its provider says is empty is not chosen, and no mark is put on it", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    keys[0]!.balance = { remaining: 0, unit: "credits", at: 1 };
+    keys[1]!.balance = { remaining: 2, unit: "credits", at: 1 };
+
+    assert.equal(usable(keys[0]!, now), false);
+    assert.equal(keys[0]!.usedUpAt, undefined);
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
+
+    // Topped up: it comes back by itself, with no one to click "bring back".
+    keys[0]!.balance = { remaining: 6, unit: "credits", at: 2 };
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k1");
+});
+
+test("a key with a reading comes before one without", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    // The first carried nothing, so a meter alone would prefer it; the second's provider says what is left.
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 0, cost: 0 };
+    keys[1]!.balance = { remaining: 0.5, unit: "credits", at: 1 };
+
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
+});
+
+test("with balances, the key in force stays unless another has more by the margin", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    keys[0]!.balance = { remaining: 10, unit: "credits", at: 1 };
+    keys[1]!.balance = { remaining: 11, unit: "credits", at: 1 };
+
+    assert.equal(steadyKey(pool1, now, plan("tokens", 0.25), "k1")?.id, "k1");
+
+    keys[1]!.balance = { remaining: 20, unit: "credits", at: 1 };
+    assert.equal(steadyKey(pool1, now, plan("tokens", 0.25), "k1")?.id, "k2");
+});

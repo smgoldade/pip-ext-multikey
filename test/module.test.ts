@@ -553,3 +553,99 @@ test("a key registered before the API is known goes in without a header, and aga
         headers: { "x-api-key": "sk-ant-one-11111111" },
     });
 });
+
+test("a provider that states a balance has it read when a key is added", async () => {
+    const h = await harness();
+    const original = globalThis.fetch;
+
+    globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ data: { limit_remaining: 4.5 } }), {
+            status: 200,
+        })) as unknown as typeof fetch;
+
+    try {
+        const view = await h.call("add", {
+            provider: "openrouter",
+            label: "One",
+            secret: "sk-or-one-11111111",
+        });
+
+        assert.equal(view.providers[0]?.probe, true);
+        assert.equal(view.providers[0]?.keys[0]?.balance?.remaining, 4.5);
+        assert.equal(view.providers[0]?.keys[0]?.balance?.unit, "credits");
+    } finally {
+        globalThis.fetch = original;
+    }
+});
+
+test("a key its provider says is empty is skipped for the next request", async () => {
+    const h = await harness();
+    const original = globalThis.fetch;
+
+    // Each key is answered by its own header: the first is empty, the second has plenty.
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+        const key = new Headers(init.headers).get("authorization") ?? "";
+        const total = key.includes("empty") ? "0" : "9";
+        const body = { balance_infos: [{ currency: "CNY", total_balance: total }] };
+
+        return new Response(JSON.stringify(body), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+        await h.call("add", { provider: "deepseek", label: "Empty", secret: "sk-deep-empty-1111" });
+        await h.call("add", { provider: "deepseek", label: "Full", secret: "sk-deep-full-2222" });
+
+        await h.request(1, "deepseek", "openai-completions");
+
+        assert.deepEqual(h.registered.at(-1), {
+            provider: "deepseek",
+            apiKey: "sk-deep-full-2222",
+            headers: { Authorization: "Bearer sk-deep-full-2222" },
+        });
+    } finally {
+        globalThis.fetch = original;
+    }
+});
+
+test("a provider with no balance endpoint is never asked to state one", async () => {
+    const h = await harness();
+    const original = globalThis.fetch;
+    let asked = 0;
+
+    globalThis.fetch = (async () => {
+        asked += 1;
+
+        return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    try {
+        await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-1111" });
+
+        assert.equal(asked, 0);
+    } finally {
+        globalThis.fetch = original;
+    }
+});
+
+test("the refresh route reads every key of a pool again", async () => {
+    const h = await harness();
+    const original = globalThis.fetch;
+    let remaining = 3;
+
+    globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ data: { limit_remaining: remaining } }), {
+            status: 200,
+        })) as unknown as typeof fetch;
+
+    try {
+        await h.call("add", { provider: "openrouter", label: "One", secret: "sk-or-one-1111" });
+
+        remaining = 1;
+
+        const view = await h.call("check", { provider: "openrouter" });
+
+        assert.equal(view.providers[0]?.keys[0]?.balance?.remaining, 1);
+    } finally {
+        globalThis.fetch = original;
+    }
+});

@@ -49,11 +49,12 @@ side: sign-in in Providers, keys in the pool.
     | --------------------- | ------------------------------------------------------------------------------- |
     | `multikey.ts`         | the module                                                                      |
     | `_multikey-policy.ts` | the rules it uses; the leading `_` keeps it from loading as a module of its own |
+    | `_multikey-probes.ts` | the three providers that state a balance; a helper too                          |
     | `multikey/` (folder)  | the popup: `index.js` and `style.css`                                           |
 
     On macOS or Linux:
 
-        cp multikey.ts _multikey-policy.ts ~/.pi-pocket/extensions/
+        cp multikey.ts _multikey-policy.ts _multikey-probes.ts ~/.pi-pocket/extensions/
         cp -r multikey ~/.pi-pocket/extensions/
 
     The folder must sit next to the module, not one level deeper: Pi Pocket serves a browser module only from beside
@@ -124,6 +125,21 @@ list order, wrapping at the end, and it skips keys that are used up or resting.
     new session  ──► the key that carries the least for its share ──► kept while it works
     new subagent ──► the key that carries the least for its share ──► kept while it works
 
+**First, the real balance.** For a provider that states what a key has left, the pool balances on that, and not on
+its own meters:
+
+| Provider        | What it answers                                         | Shown as            |
+| --------------- | ------------------------------------------------------- | ------------------- |
+| OpenRouter      | `GET /api/v1/key`: the key's own limit and what is left | `4.50 credits left` |
+| DeepSeek        | `GET /user/balance`: the account's balance              | `110.00 CNY left`   |
+| Moonshot (Kimi) | `GET /v1/users/me/balance`: the available balance       | `12.34 CNY left`    |
+
+The page shows each key's balance, when it was read, and a **Refresh balance** button. A key whose provider says it is
+empty is not used for new work, with no mark put on it: topping the account up brings it back by itself. **Menu →
+Extensions** can ask every 15 minutes (the default), or only when you press Refresh.
+
+For every other provider the module has no endpoint to read, so it balances on what it can see itself:
+
 Four things decide it:
 
 1. **A window, not a lifetime.** The pool evens out what each key carried _this month_ (or this day, or its whole life
@@ -168,6 +184,7 @@ monthly quota a second chance.
 | What the balanced mode evens out                         | cost      | cost (tokens when a model has no price), tokens, or requests |
 | The balanced mode starts again                           | monthly   | each month, each day, or never                               |
 | Switch keys only when another is lighter by              | 25%       | any gain, 10%, 25%, or 50%                                   |
+| Ask the provider what a key has left, every (minutes)    | 15        | OpenRouter, DeepSeek, Moonshot; 0 asks only on Refresh       |
 | Minutes a key rests after the provider asks to slow down | 10        | 0 puts it straight back to work                              |
 | Hours until a used-up key is tried again                 | 0 (never) | for quotas that come back, such as a month                   |
 
@@ -207,7 +224,10 @@ Read these before you rely on a pool.
 | `~/.pi/agent/auth.json`                           | provider names and kinds; an API key's value, to show a hint of it and to move it into a pool |
 | `~/.pi/agent/models-store.json` and `models.json` | the provider names only, to suggest them in the page                                          |
 
-It sends nothing anywhere. A key reaches only the provider, in the request that Pi builds, as any key does.
+It sends nothing anywhere except that check: for OpenRouter, DeepSeek, and Moonshot, a key is sent to that
+provider's own balance endpoint (`openrouter.ai/api/v1/key`, `api.deepseek.com/user/balance`,
+`api.moonshot.ai` or `api.moonshot.cn/v1/users/me/balance`), and nowhere else. A key reaches its provider in the
+request that Pi builds, as any key does.
 
 ## How it works
 

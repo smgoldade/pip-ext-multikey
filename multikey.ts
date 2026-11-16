@@ -8,12 +8,14 @@
  *
  * The keys stay in Pi Pocket's data folder (multikey/keys.json, mode 0600), and no browser ever receives one: the page
  * shows a hint. The module reads the provider names and kinds in Pi's auth.json, and an API key there only to show that
- * hint and to move the key into a pool. It sends nothing anywhere: a key reaches only its provider, in the request that
- * Pi builds.
+ * hint and to move the key into a pool. It sends nothing anywhere, except that — for a provider that states what a key
+ * has left (OpenRouter, DeepSeek, Moonshot) — it asks that provider's own endpoint, so the balanced mode can follow
+ * the real balance instead of only what Pi meters.
  *
  * By Steven Goldade — https://github.com/smgoldade/pip-ext-multikey
  */
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { probeFor, readBalance } from "./_multikey-probes.ts";
 import { join } from "node:path";
 import { defineExtension, GenerationTask, hook } from "@earendil-works/pi-durable";
 import {
@@ -59,6 +61,8 @@ const UNSAFE = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/u;
 const TELL_MINUTES = 10;
 /** How long a request may count as in flight. Past it, a claim from a request that never ended can go. */
 const INFLIGHT_MS = 120_000;
+/** How long a provider may take to say what a key has left. */
+const PROBE_TIMEOUT_MS = 10_000;
 
 type NoticeLevel = "info" | "warning" | "error";
 
@@ -180,6 +184,16 @@ const SETTINGS: readonly SettingField[] = [
         ],
     },
     {
+        name: "check",
+        label: "Ask the provider what a key has left, every (minutes)",
+        description:
+            "Only a provider that answers a balance: OpenRouter, DeepSeek, Moonshot. 0 asks only when you press Refresh.",
+        type: "number",
+        default: 15,
+        min: 0,
+        max: 1440,
+    },
+    {
         name: "cooldown",
         label: "Minutes a key rests after the provider asks to slow down",
         description: "0 puts a key straight back to work, which may hit the same limit again.",
@@ -235,6 +249,8 @@ class Engine {
     #runtime?: { logout?(provider: string): Promise<void> };
     /** Notices already sent, and when. */
     readonly #told = new Map<string, number>();
+    /** Provider → when its keys' balances were last asked, so a run cannot ask on every answer. */
+    readonly #checkedAt = new Map<string, number>();
     #timer?: ReturnType<typeof setTimeout>;
     #writing: Promise<void> = Promise.resolve();
     #closed = false;
@@ -886,6 +902,9 @@ class Engine {
         if (failure !== undefined) {
             this.#retire(provider, pool, key, failure, now);
         }
+
+        // A provider that answers with a balance is asked again when its reading is old, never on every answer.
+        void this.checkPool(provider);
     }
 
     /** Takes the key that failed out of the pool's rotation, and moves to the next key that can work. */
@@ -955,6 +974,7 @@ class Engine {
                 mode: pool.mode,
                 current: pool.current ?? null,
                 inForce: this.#inForce.has(provider),
+                probe: probeFor(provider) !== undefined,
                 storedSignIn: signIns.has(provider),
                 signInKind: signIns.get(provider)?.kind ?? null,
                 keys: pool.keys.map((key) => ({
@@ -971,6 +991,8 @@ class Engine {
                     usage: key.usage,
                     share: key.share ?? 1,
                     spent: spent(key, periodId(plan.window, now)),
+                    balance: key.balance ?? null,
+                    balanceProblem: key.balanceProblem ?? null,
                 })),
             })),
             known: await this.#known(),
@@ -991,6 +1013,7 @@ class Engine {
                 balance: plan.metric,
                 period: plan.window,
                 margin: Math.round(plan.margin * 100),
+                check: this.#count("check", 15),
                 cooldown: this.#count("cooldown", 10),
                 recover: this.#count("recover", 0),
                 notify: this.#flag("notify", true),
@@ -1028,6 +1051,8 @@ class Engine {
         this.#hide(key);
         this.#ensure(provider);
         await this.flush();
+        // A provider that answers with a balance says what this key has left, before the page shows it.
+        await this.checkPool(provider, { force: true });
         this.#web.send("changed");
     }
 
@@ -1120,6 +1145,58 @@ class Engine {
         }
 
         this.#stored = undefined;
+        this.#ensure(provider);
+        await this.flush();
+        this.#web.send("changed");
+    }
+
+    /**
+     * Asks the provider what each key of a pool has left. Only a provider that answers is asked, and not more often
+     * than the setting says, unless the owner pressed Refresh.
+     */
+    async checkPool(provider: string, options: { force?: boolean } = {}): Promise<void> {
+        const probe = probeFor(provider);
+        const pool = this.#state.providers[provider];
+
+        if (probe === undefined || pool === undefined || pool.keys.length === 0) {
+            return;
+        }
+
+        const minutes = this.#count("check", 15);
+        const now = Date.now();
+
+        if (
+            options.force !== true &&
+            (minutes <= 0 || now - (this.#checkedAt.get(provider) ?? 0) < minutes * 60_000)
+        ) {
+            return;
+        }
+
+        this.#checkedAt.set(provider, now);
+
+        await Promise.all(
+            pool.keys.map(async (key) => {
+                try {
+                    const reading = await readBalance(
+                        probe,
+                        key.secret,
+                        AbortSignal.timeout(PROBE_TIMEOUT_MS),
+                    );
+
+                    key.balance = {
+                        remaining: reading.remaining,
+                        unit: reading.unit,
+                        at: Date.now(),
+                    };
+                    delete key.balanceProblem;
+                } catch (error) {
+                    // The last reading stays: a service that is down for a moment does not empty a key.
+                    key.balanceProblem = { why: tell(error), at: Date.now() };
+                }
+            }),
+        );
+
+        // A key that ran empty comes out of force here, at once.
         this.#ensure(provider);
         await this.flush();
         this.#web.send("changed");
@@ -1341,6 +1418,12 @@ export default async function createMultiKey(host: Host, web?: Web) {
         }
 
         await engine.mode(checkProvider(web, request.body.provider), mode);
+
+        return engine.view();
+    });
+
+    web.route("POST", "check", async (request) => {
+        await engine.checkPool(checkProvider(web, request.body.provider), { force: true });
 
         return engine.view();
     });
