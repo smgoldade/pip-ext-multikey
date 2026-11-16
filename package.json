@@ -1,6 +1,6 @@
 {
     "name": "pip-ext-multikey",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "private": true,
     "description": "API key pools for Pi Pocket: several API keys for one provider, used sequentially or balanced.",
     "type": "module",

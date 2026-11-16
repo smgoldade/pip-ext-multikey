@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- **Menu → API key pools**: the pools open as a sheet from the menu, right under Pi's own Providers row. The rail
+  button and the page are still there, with the same list.
+- Pi Pocket does not let a module add rows inside the Providers sheet itself; the README says what it allows instead.
+
 ## 1.0.0
 
 - Key pools for one provider: several API keys, used one at a time.

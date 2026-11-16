@@ -22,7 +22,13 @@ switch is to edit the key by hand and restart.
   is hidden from Pi and from the transcript.
 - **Says when it switches**, with a notice in the app.
 
-Keys are added, marked used up, reset, and removed on the **API keys** page on the rail.
+Keys are added, marked used up, reset, and removed in one place, which opens two ways: **Menu → API key pools**
+(a sheet, under Pi's own Providers row) and the **API keys** button on the rail (a page).
+
+Pi Pocket does not let a module put rows inside **Menu → Providers**: that sheet is core, and a module can add menu
+rows, pages, sheets, panels, status items, and buttons, but not a section of a core sheet. The pools' sheet takes the
+same place in the flow and lists the provider next to the warning about Pi's own sign-in, so the two are used side by
+side: sign-in in Providers, keys in the pool.
 
 ## Install
 
@@ -44,7 +50,7 @@ Keys are added, marked used up, reset, and removed on the **API keys** page on t
     its module.
 
 2. Reload Pi Pocket in the browser, then turn on **API key pools** in **Menu → Extensions**. A drop-in starts off.
-3. Use the **API keys** button on the rail. Type the provider as Pi knows it (`anthropic`, `openai`,
+3. Open **Menu → API key pools** (or the **API keys** button on the rail). Type the provider as Pi knows it (`anthropic`, `openai`,
    `openrouter`, `deepseek`, …), a name for the key, and the key itself. The provider field suggests the names that
    Pi's own catalog, sign-ins, and endpoints know.
 

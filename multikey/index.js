@@ -354,6 +354,17 @@ export default function setup(pocket) {
     }
 
     pocket.page({ id: "keys", title: "API keys", component: ApiKeys });
+
+    // A sheet on the menu, under Pi's own "Providers" row: the pools are one tap from the menu, in the place that
+    // Providers takes. Pi does not let a module put rows inside that sheet.
+    pocket.sheet({ id: "pools", title: "API key pools", component: ApiKeys, wide: true });
+    pocket.menu({
+        id: "pools",
+        label: "API key pools",
+        hint: "several keys per provider",
+        sheet: "pools",
+    });
+
     pocket.rail({ id: "keys", title: "API keys", icon: "key", page: "keys" });
     pocket.launcher({
         id: "keys",
