@@ -252,6 +252,7 @@ test("balanced hands each new conversation the key that carried the least, and k
     assert.deepEqual(h.registered.at(-1), { provider: "anthropic", apiKey: "sk-ant-two-22222222" });
 
     // Conversation 1 keeps its own key, though the other one is lighter now.
+    await h.answer(2, { provider: "anthropic", stopReason: "stop", usage: { input: 10 } });
     await h.request(1, "anthropic");
     assert.deepEqual(h.registered.at(-1), { provider: "anthropic", apiKey: "sk-ant-one-11111111" });
 });
@@ -425,6 +426,67 @@ test("the page shows a hint of Pi's key, never the key", async () => {
     const view = await h.state();
 
     assert.deepEqual(view.signIns["anthropic"], { kind: "api_key", hint: "sk-…ored" });
+});
+
+test("no key switches while another conversation's request is in flight", async () => {
+    const h = await harness();
+
+    await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-11111111" });
+    await h.call("add", { provider: "anthropic", label: "Two", secret: "sk-ant-two-22222222" });
+    await h.call("mode", { provider: "anthropic", mode: "balanced" });
+
+    await h.request(1, "anthropic");
+    await h.answer(1, {
+        provider: "anthropic",
+        stopReason: "stop",
+        usage: { input: 50_000, output: 100 },
+    });
+
+    // Conversation 2 asks, and its request has not ended: the key in force stays for anyone else.
+    await h.request(2, "anthropic");
+    assert.deepEqual(h.registered.at(-1), { provider: "anthropic", apiKey: "sk-ant-two-22222222" });
+
+    await h.request(1, "anthropic");
+    assert.deepEqual(h.registered.at(-1), { provider: "anthropic", apiKey: "sk-ant-two-22222222" });
+
+    // Once that request is answered, conversation 1 gets its own key back.
+    await h.answer(2, { provider: "anthropic", stopReason: "stop", usage: { input: 10 } });
+    await h.request(1, "anthropic");
+    assert.deepEqual(h.registered.at(-1), { provider: "anthropic", apiKey: "sk-ant-one-11111111" });
+});
+
+test("usage is booked to the key that carried the request, not to the one in force", async () => {
+    const h = await harness();
+
+    await h.call("add", { provider: "anthropic", label: "One", secret: "sk-ant-one-11111111" });
+    await h.call("add", { provider: "anthropic", label: "Two", secret: "sk-ant-two-22222222" });
+    await h.call("mode", { provider: "anthropic", mode: "balanced" });
+
+    await h.request(1, "anthropic");
+    await h.answer(1, { provider: "anthropic", stopReason: "stop", usage: { input: 1000 } });
+    await h.request(2, "anthropic");
+
+    // Conversation 2 is in flight, so conversation 1's request goes out with conversation 2's key.
+    await h.request(1, "anthropic");
+    await h.answer(1, { provider: "anthropic", stopReason: "stop", usage: { input: 5000 } });
+
+    const view = await h.state();
+    const [one, two] = view.providers[0]?.keys ?? [];
+
+    assert.equal(one?.usage.input, 1000);
+    assert.equal(two?.usage.input, 5000);
+});
+
+test("a share says how much of the pool a key should take", async () => {
+    const h = await harness();
+
+    await h.call("add", { provider: "anthropic", label: "Big", secret: "sk-ant-big-11111111" });
+    await h.call("add", { provider: "anthropic", label: "Small", secret: "sk-ant-small-222222" });
+    await h.call("mode", { provider: "anthropic", mode: "balanced" });
+
+    const view = await h.call("share", { provider: "anthropic", id: "k1", share: 4 });
+
+    assert.equal(view.providers[0]?.keys[0]?.share, 4);
 });
 
 test("a pool's key goes out in place of Pi's own API key", async () => {

@@ -1,6 +1,6 @@
 {
     "name": "pip-ext-multikey",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "private": true,
     "description": "Keeps several API keys for one provider in Pi Pocket, so a key that is spent, refused, or rate-limited never stops the work.",
     "author": "Steven Goldade",

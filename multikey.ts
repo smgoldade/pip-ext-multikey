@@ -20,6 +20,7 @@ import {
     addKey,
     addUsage,
     classifyFailure,
+    periodId,
     emptyPool,
     emptyState,
     keyOf,
@@ -29,8 +30,10 @@ import {
     pickFor,
     pickSequential,
     prunePicks,
+    spent,
     usable,
     type BalanceMetric,
+    type BalancePlan,
     type Failure,
     type Mode,
     type Pool,
@@ -54,6 +57,8 @@ const PROVIDER = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const UNSAFE = /[\p{Cc}\p{Bidi_Control}\u2028\u2029]/u;
 /** How long a notice about one pool waits before it may repeat. */
 const TELL_MINUTES = 10;
+/** How long a request may count as in flight. Past it, a claim from a request that never ended can go. */
+const INFLIGHT_MS = 120_000;
 
 type NoticeLevel = "info" | "warning" | "error";
 
@@ -138,12 +143,40 @@ const SETTINGS: readonly SettingField[] = [
     {
         name: "balance",
         label: "What the balanced mode evens out",
+        description:
+            "Cost uses Pi's own prices, and counts tokens instead for a model that has none.",
         type: "choice",
-        default: "tokens",
+        default: "cost",
         choices: [
+            { value: "cost", label: "Cost" },
             { value: "tokens", label: "Tokens" },
             { value: "requests", label: "Requests" },
-            { value: "cost", label: "Cost" },
+        ],
+    },
+    {
+        name: "period",
+        label: "The balanced mode starts again",
+        description:
+            "A quota that comes back monthly is balanced per month, not over a key's whole life.",
+        type: "choice",
+        default: "month",
+        choices: [
+            { value: "month", label: "Each month" },
+            { value: "day", label: "Each day" },
+            { value: "never", label: "Never" },
+        ],
+    },
+    {
+        name: "margin",
+        label: "Switch keys only when another is lighter by",
+        description: "Every switch costs the provider's prompt cache. 0 switches for any gain.",
+        type: "choice",
+        default: "25",
+        choices: [
+            { value: "0", label: "Any gain" },
+            { value: "10", label: "10%" },
+            { value: "25", label: "25%" },
+            { value: "50", label: "50%" },
         ],
     },
     {
@@ -190,6 +223,8 @@ class Engine {
     readonly #inForce = new Map<string, { id: string; api?: string; dispose: () => void }>();
     /** Conversation id → its provider, learned from the requests it made. */
     readonly #providers = new Map<number, string>();
+    /** Conversation id → the provider and key of the request it has in flight, and when that request started. */
+    readonly #inflight = new Map<number, { provider: string; keyId: string; at: number }>();
     /** The provider that a request last came from, for a conversation that has none yet. */
     #last?: string;
     /** Secret → how to stop hiding it again. */
@@ -518,7 +553,19 @@ class Engine {
     #metric(): BalanceMetric {
         const value = this.#web.setting("balance");
 
-        return value === "requests" || value === "cost" ? value : "tokens";
+        return value === "requests" || value === "tokens" ? value : "cost";
+    }
+
+    /** How a balanced pool chooses: the window it evens out, the metric, and the gain that is worth a switch. */
+    #plan(): BalancePlan {
+        const window = this.#web.setting("period");
+        const margin = Number(this.#web.setting("margin"));
+
+        return {
+            window: window === "day" || window === "never" ? window : "month",
+            metric: this.#metric(),
+            margin: Number.isFinite(margin) && margin >= 0 && margin <= 100 ? margin / 100 : 0.25,
+        };
     }
 
     /** Brings back the keys whose rest is over, and says whether it did. */
@@ -700,38 +747,56 @@ class Engine {
         }
 
         const now = Date.now();
+        const plan = this.#plan();
+        const conversation = String(conversationId);
+        const current = keyOf(pool, pool.current);
+        const ready = current !== undefined && usable(current, now) ? current : undefined;
+        const fresh = pool.picks[conversation] === undefined;
         let changed = this.#recover(pool, now);
         let key: PoolKey | undefined;
 
         if (pool.mode === "balanced") {
-            const conversation = String(conversationId);
-            const current = keyOf(pool, pool.current);
-
-            if (
-                exact !== undefined &&
-                pool.picks[conversation] === undefined &&
-                current !== undefined
-            ) {
-                // The request is built: the key that it went out with is the one that this conversation uses.
-                pool.picks[conversation] = { id: current.id, at: now };
-                prunePicks(pool, now);
-                changed = true;
-            } else {
-                key = pickFor(pool, conversation, now, this.#metric());
-
-                if (key !== undefined && pool.picks[conversation]?.id !== key.id) {
-                    pool.picks[conversation] = { id: key.id, at: now };
-                    prunePicks(pool, now);
-                    changed = true;
-                }
-            }
+            // The lightest key for its share, unless the key in force is close enough: a switch costs the prompt cache.
+            key = pickFor(pool, conversation, now, plan, pool.current);
         } else {
             key = pickSequential(pool, now);
         }
 
-        if (key !== undefined && pool.current !== key.id) {
-            pool.current = key.id;
-            changed = true;
+        // While another conversation of this provider has a request in flight, the key in force must not change: that
+        // request would go out with the new one, and the switch would cost a registration for nothing.
+        const busy = this.#busy(provider, conversationId, now);
+        const use =
+            exact !== undefined
+                ? (ready ?? key)
+                : busy && ready !== undefined
+                  ? ready
+                  : (key ?? ready);
+
+        if (use !== undefined) {
+            if (pool.current !== use.id) {
+                pool.current = use.id;
+                changed = true;
+            }
+
+            this.#inflight.set(conversationId, { provider, keyId: use.id, at: now });
+        }
+
+        if (pool.mode === "balanced") {
+            // A new conversation joins the key that its request really goes out with. One that already has a key keeps
+            // it, however the pool is doing; it only takes another when its own key is gone, used up, or resting.
+            const picked = keyOf(pool, pool.picks[conversation]?.id);
+            const bound =
+                fresh || picked === undefined || !usable(picked, now)
+                    ? fresh
+                        ? (use ?? key)
+                        : (key ?? use)
+                    : undefined;
+
+            if (bound !== undefined && pool.picks[conversation]?.id !== bound.id) {
+                pool.picks[conversation] = { id: bound.id, at: now };
+                prunePicks(pool, now);
+                changed = true;
+            }
         }
 
         if (changed) {
@@ -739,6 +804,25 @@ class Engine {
         }
 
         this.#ensure(provider);
+    }
+
+    /**
+     * Whether another conversation is in the middle of a request to this provider. Its key must not change under it:
+     * Pi reads the key when a request starts, so a switch in that moment sends one request with the wrong key.
+     */
+    #busy(provider: string, except: number, now: number): boolean {
+        let busy = false;
+
+        for (const [id, entry] of this.#inflight) {
+            if (now - entry.at > INFLIGHT_MS) {
+                // A request that never ended, from a crash or a stop: its claim can go.
+                this.#inflight.delete(id);
+            } else if (id !== except && entry.provider === provider) {
+                busy = true;
+            }
+        }
+
+        return busy;
     }
 
     /** After each answer: what the key in force carried, and whether the provider turned it down. */
@@ -758,7 +842,20 @@ class Engine {
         }
 
         const now = Date.now();
-        const key = keyOf(pool, pool.current);
+        const plan = this.#plan();
+        const inFlight = this.#inflight.get(conversationId);
+
+        this.#inflight.delete(conversationId);
+
+        // What carried this request is the key it went out with, which is not always the key in force now: another
+        // conversation may have switched it while this request was being answered.
+        const carried =
+            inFlight !== undefined &&
+            inFlight.provider === provider &&
+            now - inFlight.at < INFLIGHT_MS
+                ? inFlight.keyId
+                : pool.current;
+        const key = keyOf(pool, carried) ?? keyOf(pool, pool.current);
         const failed = message.stopReason === "error";
 
         if (key === undefined) {
@@ -776,6 +873,7 @@ class Engine {
                 error: failed,
             },
             now,
+            periodId(plan.window, now),
         );
         this.#save();
 
@@ -804,7 +902,7 @@ class Engine {
             delete key.coolUntil;
         }
 
-        const next = pickAfter(pool, key.id, now, this.#metric());
+        const next = pickAfter(pool, key.id, now, this.#plan());
 
         if (next !== undefined && next.id !== key.id) {
             pool.current = next.id;
@@ -848,6 +946,7 @@ class Engine {
     /** What the page shows: the pools, and never a key itself. */
     async view(): Promise<unknown> {
         const now = Date.now();
+        const plan = this.#plan();
         const signIns = await this.#signIns();
 
         return {
@@ -870,6 +969,8 @@ class Engine {
                             ? key.coolUntil
                             : null,
                     usage: key.usage,
+                    share: key.share ?? 1,
+                    spent: spent(key, periodId(plan.window, now)),
                 })),
             })),
             known: await this.#known(),
@@ -887,7 +988,9 @@ class Engine {
                 ]),
             ),
             settings: {
-                balance: this.#metric(),
+                balance: plan.metric,
+                period: plan.window,
+                margin: Math.round(plan.margin * 100),
                 cooldown: this.#count("cooldown", 10),
                 recover: this.#count("recover", 0),
                 notify: this.#flag("notify", true),
@@ -1018,6 +1121,20 @@ class Engine {
 
         this.#stored = undefined;
         this.#ensure(provider);
+        await this.flush();
+        this.#web.send("changed");
+    }
+
+    /** Sets how much of a pool a key should take: 2 takes twice the load of 1. */
+    async share(provider: string, id: string, share: number): Promise<void> {
+        const pool = this.#pool(provider);
+        const key = keyOf(pool, id);
+
+        if (key === undefined) {
+            throw this.#web.error(404, "That key is not in the pool anymore.");
+        }
+
+        key.share = share;
         await this.flush();
         this.#web.send("changed");
     }
@@ -1224,6 +1341,22 @@ export default async function createMultiKey(host: Host, web?: Web) {
         }
 
         await engine.mode(checkProvider(web, request.body.provider), mode);
+
+        return engine.view();
+    });
+
+    web.route("POST", "share", async (request) => {
+        const share = Number(request.body.share);
+
+        if (!Number.isInteger(share) || share < 1 || share > 100) {
+            throw web.error(400, "A share is a whole number from 1 to 100.");
+        }
+
+        await engine.share(
+            checkProvider(web, request.body.provider),
+            checkId(web, request.body.id),
+            share,
+        );
 
         return engine.view();
     });

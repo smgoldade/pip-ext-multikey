@@ -40,6 +40,14 @@ export type PoolKey = {
     usedUpReason?: string;
     /** Set when the provider said "not now": the key rests until then. */
     coolUntil?: number;
+    /**
+     * How much of the pool this key should take: 2 takes twice the load of 1. A bigger account gets a bigger share.
+     * Absent in a file from before shares: it counts as 1.
+     */
+    share?: number;
+    /** What it carried in the balance window, which rolls over. Absent in an older file. */
+    spend?: KeySpend;
+    /** What it carried in all: the page's own numbers. */
     usage: KeyUsage;
 };
 
@@ -179,18 +187,68 @@ export function usable(key: PoolKey, now: number): boolean {
     return !(typeof key.coolUntil === "number" && key.coolUntil > now);
 }
 
-/** What a key carried so far, as the pool's balance metric counts it. */
-export function weight(key: PoolKey, metric: BalanceMetric): number {
-    const usage = key.usage;
+/**
+ * What a key carried in this window, per share: the load that balances. A key with share 2 counts half of what it
+ * carried, so a key that is twice the size takes twice the work. A share of 0 is a key that the owner made never
+ * wanted here; it counts as 1, so it still carries a fifth of the pool.
+ */
+export function weight(key: PoolKey, period: string, metric: BalanceMetric): number {
+    const carried = spent(key, period);
+    const share = key.share !== undefined && key.share > 0 ? key.share : 1;
 
     switch (metric) {
         case "requests":
-            return usage.requests;
+            return carried.requests / share;
         case "cost":
-            return usage.cost;
+            return carried.cost / share;
         default:
-            return usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+            return carried.tokens / share;
     }
+}
+
+/** What a key carried in the pool's balance window. It rolls over when the window's id changes. */
+export type KeySpend = { period: string; requests: number; tokens: number; cost: number };
+
+/** The window that a balanced pool evens out: a quota that comes back, or the key's whole life. */
+export type BalanceWindow = "month" | "day" | "never";
+
+/** How a balanced pool chooses: the window, the metric, and how much lighter another key must be to switch to it. */
+export type BalancePlan = { window: BalanceWindow; metric: BalanceMetric; margin: number };
+
+/** The id of the current window: a month, a day, or one id for everything. */
+export function periodId(window: BalanceWindow, now: number): string {
+    if (window === "never") {
+        return "all";
+    }
+
+    const iso = new Date(now).toISOString();
+
+    return window === "day" ? iso.slice(0, 10) : iso.slice(0, 7);
+}
+
+/** What a key carried in this window: nothing, when the window has rolled over since its last request. */
+export function spent(key: PoolKey, period: string): KeySpend {
+    const spend = key.spend;
+
+    return spend !== undefined && spend.period === period
+        ? spend
+        : { period, requests: 0, tokens: 0, cost: 0 };
+}
+
+/**
+ * The metric a pool really uses: cost, unless no key has been priced in this window, where tokens say more than a
+ * column of zeros.
+ */
+export function effectiveMetric(
+    keys: readonly PoolKey[],
+    period: string,
+    metric: BalanceMetric,
+): BalanceMetric {
+    if (metric !== "cost") {
+        return metric;
+    }
+
+    return keys.some((key) => spent(key, period).cost > 0) ? "cost" : "tokens";
 }
 
 /** The keys that can carry a request now, in the pool's order. */
@@ -237,18 +295,50 @@ export function soonestResting(pool: Pool, now: number): PoolKey | undefined {
 }
 
 /**
- * Balanced: the key that carried the least, by the metric. A tie goes to the key that was idle longest, then to the
- * one added first. When every key is resting, the one that rests until soonest.
+ * Balanced: the key that carries the least for its share, by the metric. A tie goes to the key that was idle longest,
+ * then to the one added first. When every key is resting, the one that rests until soonest.
  */
-export function pickBalanced(pool: Pool, now: number, metric: BalanceMetric): PoolKey | undefined {
+export function pickBalanced(pool: Pool, now: number, plan: BalancePlan): PoolKey | undefined {
+    const period = periodId(plan.window, now);
+    const metric = effectiveMetric(pool.keys, period, plan.metric);
     const ranked = usableKeys(pool, now).sort(
         (left, right) =>
-            weight(left, metric) - weight(right, metric) ||
+            weight(left, period, metric) - weight(right, period, metric) ||
             left.usage.lastAt - right.usage.lastAt ||
             left.addedAt - right.addedAt,
     );
 
     return ranked[0] ?? soonestResting(pool, now);
+}
+
+/**
+ * The key to start on when a conversation needs one: the lightest, unless the key in force is within the plan's
+ * margin of it. Every switch re-registers the provider and throws away the provider's prompt cache, so a small gain
+ * is not worth it.
+ */
+export function steadyKey(
+    pool: Pool,
+    now: number,
+    plan: BalancePlan,
+    keep?: string,
+): PoolKey | undefined {
+    const best = pickBalanced(pool, now, plan);
+    const current = keyOf(pool, keep);
+
+    if (best === undefined || current === undefined || current.id === best.id) {
+        return best ?? current;
+    }
+
+    if (!usable(current, now)) {
+        return best;
+    }
+
+    const period = periodId(plan.window, now);
+    const metric = effectiveMetric(pool.keys, period, plan.metric);
+    const now_ = weight(current, period, metric);
+    const next = weight(best, period, metric);
+
+    return next >= now_ * (1 - plan.margin) ? current : best;
 }
 
 /**
@@ -259,7 +349,8 @@ export function pickFor(
     pool: Pool,
     conversationId: string,
     now: number,
-    metric: BalanceMetric,
+    plan: BalancePlan,
+    keep?: string,
 ): PoolKey | undefined {
     const pick = pool.picks[conversationId];
     const kept = keyOf(pool, pick?.id);
@@ -268,7 +359,7 @@ export function pickFor(
         return kept;
     }
 
-    return pool.mode === "balanced" ? pickBalanced(pool, now, metric) : pickSequential(pool, now);
+    return pool.mode === "balanced" ? steadyKey(pool, now, plan, keep) : pickSequential(pool, now);
 }
 
 /** The next key to try after one failed: sequential order, then balance, then what is left. */
@@ -276,7 +367,7 @@ export function pickAfter(
     pool: Pool,
     failed: string | undefined,
     now: number,
-    metric: BalanceMetric,
+    plan: BalancePlan,
 ): PoolKey | undefined {
     const others = usableKeys(pool, now).filter((key) => key.id !== failed);
 
@@ -285,9 +376,12 @@ export function pickAfter(
     }
 
     if (pool.mode === "balanced") {
+        const period = periodId(plan.window, now);
+        const metric = effectiveMetric(pool.keys, period, plan.metric);
+
         return others.sort(
             (left, right) =>
-                weight(left, metric) - weight(right, metric) ||
+                weight(left, period, metric) - weight(right, period, metric) ||
                 left.usage.lastAt - right.usage.lastAt ||
                 left.addedAt - right.addedAt,
         )[0];
@@ -331,6 +425,8 @@ export function addKey(
         label: fields.label,
         secret: fields.secret,
         addedAt: now,
+        share: 1,
+        spend: { period: "", requests: 0, tokens: 0, cost: 0 },
         usage: emptyUsage(),
     };
 
@@ -357,23 +453,35 @@ export function addUsage(
           }
         | undefined,
     now: number,
+    period: string,
 ): void {
+    const input = Math.max(0, reported?.input ?? 0);
+    const output = Math.max(0, reported?.output ?? 0);
+    const cacheRead = Math.max(0, reported?.cacheRead ?? 0);
+    const cacheWrite = Math.max(0, reported?.cacheWrite ?? 0);
+    const cost = Math.max(0, reported?.cost ?? 0);
+
     key.usage.requests += 1;
     key.usage.lastAt = now;
+    key.usage.input += input;
+    key.usage.output += output;
+    key.usage.cacheRead += cacheRead;
+    key.usage.cacheWrite += cacheWrite;
+    key.usage.cost += cost;
 
-    if (reported === undefined) {
-        return;
-    }
-
-    key.usage.input += Math.max(0, reported.input ?? 0);
-    key.usage.output += Math.max(0, reported.output ?? 0);
-    key.usage.cacheRead += Math.max(0, reported.cacheRead ?? 0);
-    key.usage.cacheWrite += Math.max(0, reported.cacheWrite ?? 0);
-    key.usage.cost += Math.max(0, reported.cost ?? 0);
-
-    if (reported.error === true) {
+    if (reported?.error === true) {
         key.usage.errors += 1;
     }
+
+    // The window's own numbers, which start again when the window rolls over.
+    const before = spent(key, period);
+
+    key.spend = {
+        period,
+        requests: before.requests + 1,
+        tokens: before.tokens + input + output + cacheRead + cacheWrite,
+        cost: before.cost + cost,
+    };
 }
 
 /** How many conversations a pool remembers. Older ones are forgotten first. */
@@ -417,6 +525,12 @@ function keyFrom(value: unknown): PoolKey | undefined {
         unknown
     >;
 
+    const spend = (typeof raw.spend === "object" && raw.spend !== null ? raw.spend : {}) as Record<
+        string,
+        unknown
+    >;
+    const share = count(raw.share, 1);
+
     return {
         id,
         label: text(raw.label, "key"),
@@ -425,6 +539,13 @@ function keyFrom(value: unknown): PoolKey | undefined {
         usedUpAt: typeof raw.usedUpAt === "number" ? count(raw.usedUpAt) : undefined,
         usedUpReason: typeof raw.usedUpReason === "string" ? raw.usedUpReason : undefined,
         coolUntil: typeof raw.coolUntil === "number" ? count(raw.coolUntil) : undefined,
+        share: share >= 1 && share <= 100 ? share : 1,
+        spend: {
+            period: text(spend.period),
+            requests: count(spend.requests),
+            tokens: count(spend.tokens),
+            cost: count(spend.cost),
+        },
         usage: {
             requests: count(usage.requests),
             errors: count(usage.errors),

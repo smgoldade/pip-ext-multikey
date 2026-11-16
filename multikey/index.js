@@ -44,6 +44,11 @@ function when(at, now) {
     return ahead ? `in ${words}` : `${words} ago`;
 }
 
+/** The balance window, as a word for a sentence: a month, a day, or the whole life of the key. */
+function periodWord(period) {
+    return period === "day" ? "day" : period === "never" ? "whole life" : "month";
+}
+
 /** What a provider's row says under its name, as Menu → Providers says it. */
 function about(provider) {
     const models =
@@ -292,6 +297,40 @@ export default function setup(pocket) {
                 )} tokens · $${money(key.usage.cost)}
                 ${key.usedUpAt !== null ? html`· <span>${key.usedUpReason}</span>` : null}
             </div>
+            ${
+                pool.mode === "balanced"
+                    ? html`<div class="mk-share">
+                      <label class="muted small">
+                          Share
+                          <input
+                              class="mk-input mk-share-input"
+                              type="number"
+                              min="1"
+                              max="100"
+                              value=${key.share ?? 1}
+                              disabled=${busy === "share" + key.id}
+                              onChange=${(event) => {
+                                  const share = Number(event.currentTarget.value);
+
+                                  if (Number.isInteger(share) && share >= 1 && share <= 100) {
+                                      void act("share" + key.id, () =>
+                                          pocket.api("share", {
+                                              provider: pool.provider,
+                                              id: key.id,
+                                              share,
+                                          }),
+                                      );
+                                  }
+                              }}
+                          />
+                      </label>
+                      <span class="muted small">
+                          this ${periodWord(view.settings.period)}:
+                          ${tokens(key.spent?.tokens ?? 0)} tokens · $${money(key.spent?.cost ?? 0)}
+                      </span>
+                  </div>`
+                    : null
+            }
             <div class="mk-actions">
                 <button
                     class="button small"
@@ -406,9 +445,7 @@ export default function setup(pocket) {
                                 pool === undefined
                                     ? "Add the first key. Then choose how its keys take turns: a key stays until its quota is gone (sequential), or each new session takes the one that carried the least (balanced)."
                                     : pool.mode === "balanced"
-                                      ? `Each new session or subagent takes the key that carried the least (${
-                                            view.settings.balance
-                                        }), and keeps it while it works.`
+                                      ? `Each new session or subagent takes the key that carried the least for its share, this ${periodWord(view.settings.period)} (${view.settings.balance}), and keeps it while it works. A key with share 2 takes twice the work of share 1; another key takes over only when it is lighter by ${view.settings.margin}%.`
                                       : "A key stays in use until the provider says its quota is gone, then the next key takes over."
                             }
                         </p>

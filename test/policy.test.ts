@@ -10,6 +10,10 @@ import {
     normalizeState,
     pickAfter,
     pickBalanced,
+    periodId,
+    steadyKey,
+    effectiveMetric,
+    weight,
     pickFor,
     pickSequential,
     prunePicks,
@@ -141,48 +145,109 @@ test("sequential wraps around, and waits for a key that is resting", () => {
     assert.equal(pickSequential(pool1, now + 120_000)?.id, "k2");
 });
 
+/** A plan for the tests: one window, one metric, and no margin, so a pick is the plain lightest key. */
+const plan = (metric: "tokens" | "requests" | "cost" = "tokens", margin = 0) => ({
+    window: "never" as const,
+    metric,
+    margin,
+});
+
 test("balanced takes the key that carried the least, and the one idle longest on a tie", () => {
     const keys = [key("k1"), key("k2")];
     const pool1 = pool(keys, "balanced");
 
-    keys[0]!.usage.input = 500;
-    assert.equal(pickBalanced(pool1, now, "tokens")?.id, "k2");
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 500, cost: 0 };
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
 
-    keys[1]!.usage.input = 500;
+    keys[1]!.spend = { period: "all", requests: 1, tokens: 500, cost: 0 };
     keys[0]!.usage.lastAt = now - 1000;
     keys[1]!.usage.lastAt = now - 5000;
-    assert.equal(pickBalanced(pool1, now, "tokens")?.id, "k2");
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
 
     // Fewer requests on the first key: another metric, another key.
-    keys[1]!.usage.requests = 3;
-    assert.equal(pickBalanced(pool1, now, "requests")?.id, "k1");
+    keys[1]!.spend = { period: "all", requests: 3, tokens: 500, cost: 0 };
+    assert.equal(pickBalanced(pool1, now, plan("requests"))?.id, "k1");
+});
+
+test("a window rolls over: what a key carried last month does not weigh on this one", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+    const monthly = { window: "month" as const, metric: "tokens" as const, margin: 0 };
+
+    keys[0]!.spend = { period: periodId("month", now), requests: 1, tokens: 900, cost: 0 };
+    keys[1]!.spend = { period: periodId("month", now), requests: 1, tokens: 100, cost: 0 };
+    assert.equal(pickBalanced(pool1, now, monthly)?.id, "k2");
+
+    // A month later, both windows are empty: the first key is free again.
+    const later = now + 31 * 24 * 3_600_000;
+    const both = pool1.keys.map((each) => weight(each, periodId("month", later), "tokens"));
+
+    assert.deepEqual(both, [0, 0]);
+});
+
+test("a key's share is what it should carry: share 2 takes twice the load", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    keys[0]!.share = 2;
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 400, cost: 0 };
+    keys[1]!.spend = { period: "all", requests: 1, tokens: 300, cost: 0 };
+
+    // 400 over a share of 2 is 200 per share, less than 300: the bigger key keeps taking work.
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k1");
+
+    keys[0]!.spend.tokens = 800;
+    assert.equal(pickBalanced(pool1, now, plan())?.id, "k2");
+});
+
+test("the key in force stays, unless another is lighter by the margin", () => {
+    const keys = [key("k1"), key("k2")];
+    const pool1 = pool(keys, "balanced");
+
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 100, cost: 0 };
+    keys[1]!.spend = { period: "all", requests: 1, tokens: 80, cost: 0 };
+
+    // 20% lighter is not worth a switch at a margin of 25%.
+    assert.equal(steadyKey(pool1, now, plan("tokens", 0.25), "k1")?.id, "k1");
+    // At no margin, it is.
+    assert.equal(steadyKey(pool1, now, plan("tokens", 0), "k1")?.id, "k2");
+});
+
+test("cost balances only when a model is priced", () => {
+    const keys = [key("k1"), key("k2")];
+
+    assert.equal(effectiveMetric(keys, "all", "cost"), "tokens");
+
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 10, cost: 0.4 };
+    assert.equal(effectiveMetric(keys, "all", "cost"), "cost");
+    assert.equal(effectiveMetric(keys, "all", "tokens"), "tokens");
 });
 
 test("a conversation keeps its key while it works, and gets another when that one is used up", () => {
     const keys = [key("k1"), key("k2")];
     const pool1 = pool(keys, "balanced");
 
-    const first = pickFor(pool1, "7", now, "tokens");
+    const first = pickFor(pool1, "7", now, plan());
     assert.equal(first?.id, "k1");
     pool1.picks["7"] = { id: "k1", at: now };
 
     // Another conversation carries more on k1, so the balance alone would move conversation 7.
-    keys[0]!.usage.input = 10_000;
-    assert.equal(pickFor(pool1, "7", now, "tokens")?.id, "k1");
+    keys[0]!.spend = { period: "all", requests: 1, tokens: 10_000, cost: 0 };
+    assert.equal(pickFor(pool1, "7", now, plan())?.id, "k1");
 
     keys[0]!.usedUpAt = now;
-    assert.equal(pickFor(pool1, "7", now, "tokens")?.id, "k2");
+    assert.equal(pickFor(pool1, "7", now, plan())?.id, "k2");
 });
 
 test("the next key after a failure skips the one that failed", () => {
     const keys = [key("k1"), key("k2"), key("k3")];
     const pool1 = pool(keys);
 
-    assert.equal(pickAfter(pool1, "k1", now, "tokens")?.id, "k2");
-    assert.equal(pickAfter(pool1, "k3", now, "tokens")?.id, "k1");
+    assert.equal(pickAfter(pool1, "k1", now, plan())?.id, "k2");
+    assert.equal(pickAfter(pool1, "k3", now, plan())?.id, "k1");
 
     keys[1]!.usedUpAt = now;
-    assert.equal(pickAfter(pool1, "k1", now, "tokens")?.id, "k3");
+    assert.equal(pickAfter(pool1, "k1", now, plan())?.id, "k3");
 });
 
 test("a pool whose keys are all gone has no key to pick", () => {
@@ -194,8 +259,8 @@ test("a pool whose keys are all gone has no key to pick", () => {
     const pool1 = pool(keys);
 
     assert.equal(pickSequential(pool1, now), undefined);
-    assert.equal(pickBalanced(pool1, now, "tokens"), undefined);
-    assert.equal(pickAfter(pool1, "k1", now, "tokens"), undefined);
+    assert.equal(pickBalanced(pool1, now, plan()), undefined);
+    assert.equal(pickAfter(pool1, "k1", now, plan()), undefined);
 });
 
 test("a key shows as its first characters and its last four", () => {
@@ -217,8 +282,8 @@ test("a new key gets the next id, and the first one is in force", () => {
 test("what a key carried adds up, and never goes down", () => {
     const key1 = key("k1");
 
-    addUsage(key1, { input: 10, output: 5, cacheRead: 3, cacheWrite: 1, cost: 0.25 }, now);
-    addUsage(key1, { input: 10, output: 5, cost: 0.25, error: true }, now + 1);
+    addUsage(key1, { input: 10, output: 5, cacheRead: 3, cacheWrite: 1, cost: 0.25 }, now, "all");
+    addUsage(key1, { input: 10, output: 5, cost: 0.25, error: true }, now + 1, "all");
 
     assert.equal(key1.usage.requests, 2);
     assert.equal(key1.usage.errors, 1);

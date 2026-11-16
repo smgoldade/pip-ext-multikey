@@ -1,32 +1,45 @@
 # Changelog
 
+## 1.7.0
+
+Balanced mode, rebuilt around what a quota really is.
+
+- **A window, not a lifetime.** A pool evens out what each key carried this month (or day, or its whole life): a
+  monthly quota that comes back is no longer weighed down by everything a key ever did.
+- **A share per key.** Weight = the window's spend ÷ the key's share, so a key with share 2 takes twice the work of
+  share 1. The panel shows the share beside what the key carried in the window, and changes it with one field.
+- **A margin.** The lightest key takes over only when it is lighter by the margin (25% by default), because a switch
+  costs the provider's prompt cache.
+- **Quiet switching.** The key in force never changes while another conversation of the same provider has a request in
+  flight, which removes the case where Pi sent a request with another session's key.
+- **Correct booking.** Usage is booked to the key that really carried the request, not to whatever key was in force
+  when the answer arrived.
+- **Cost first.** The metric is cost from Pi's own prices, and falls back to tokens for a model with no price.
+- Two settings more: the window, and the margin. A spinning key that is resting after a rate limit is skipped for new
+  conversations, not only for the run that hit it.
+
 ## 1.6.0
 
-- **The pools open as a popup everywhere.** The rail button, the menu row, and the launcher now all open the same wide
-  sheet that Menu → Providers opens, so there is one screen and no full page. The sheet keeps its title, its width of
-  760 px on a wide screen, and its place in the flow beside Providers.
+- **The pools open as a popup everywhere**: the rail button, the menu row, and the launcher all open the same wide
+  sheet that Menu → Providers opens. No full page.
 
 ## 1.5.0
 
-- **Pi's own keys show in the pool panel.** A provider that Menu → Providers signed in with an API key now shows a
-  `Pi key sk-ant-…4f2c` pill on its row, and the panel shows the key with a hint, plus **Take it into the pool**.
-- **Take it into the pool** copies Pi's key into the pool as `From Pi` and signs that provider out of Pi's own store
-  through Pi's own sign-out call, so one panel holds every key. A subscription sign-in is explained instead.
-- **A description that reads well in the Extensions sheet**, and an author: **Steven Goldade**.
+- **Pi's own keys show in the pool panel**, with a hint and **Take it into the pool**: the key becomes a pool key, and
+  the provider signs out of Pi's own store through Pi's own call.
+- **A description for the Extensions sheet**, and an author: **Steven Goldade**.
 
 ## 1.4.0
 
-- **The page now uses Menu → Providers' own layout**: the same search box, the same group headings with their counts,
-  and the same bordered list of rows, each with a button on the right (**Add key**, or **Keys**).
-- A row's panel opens under it with the same tint and slide as a provider's sign-in in Providers, and holds the mode,
-  the keys, the form for the next key, and Remove the pool. The Subagent models column is not there.
-- The page draws with Pi Pocket's classes for those parts, so it follows the theme and the phone layout.
+- **The page uses Menu → Providers' own layout**: the same search box, group headings, bordered rows, and a panel under
+  each row with **Add key** or **Keys** on the right.
+- The Subagent models column is not there.
 
 ## 1.3.0
 
-- **A pool's key now goes out in place of Pi's own API key**, by carrying the header that the provider's API reads its
-  key from. A subscription sign-in is left alone.
-- **Rows open in place**, as in Menu → Providers: no second page.
+- **A pool's key goes out in place of Pi's own API key**, by carrying the header that the provider's API reads its key
+  from. A subscription sign-in is left alone.
+- **Rows open in place**, as in Menu → Providers.
 
 ## 1.2.0
 
@@ -46,4 +59,3 @@
 - Usage per key: requests, tokens, cost. Resettable.
 - An **API keys** page on the rail, with add, use now, used up, bring back, reset, remove, and remove the pool.
 - Four settings: notices, balance metric, cooldown, and recovery.
-- Keys are hidden from Pi and from the transcript, and no route returns one.

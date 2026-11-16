@@ -116,6 +116,20 @@
     color: var(--warn);
 }
 
+/* In the balanced mode: how much of the pool a key takes, and what it carried in the window. */
+.mk-share {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.mk-share-input {
+    flex: 0 0 auto;
+    width: 64px;
+    margin-left: 4px;
+}
+
 .mk-actions {
     display: flex;
     flex-wrap: wrap;

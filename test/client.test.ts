@@ -92,6 +92,8 @@ const view = {
                         cost: 0.25,
                         lastAt: 1,
                     },
+                    share: 2,
+                    spent: { period: "2026-11", requests: 2, tokens: 1500, cost: 0.02 },
                 },
                 {
                     id: "k2",
@@ -111,6 +113,8 @@ const view = {
                         cost: 0,
                         lastAt: 1,
                     },
+                    share: 1,
+                    spent: { period: "2026-11", requests: 1, tokens: 12, cost: 0 },
                 },
             ],
         },
@@ -125,7 +129,14 @@ const view = {
         anthropic: { kind: "api_key", hint: "sk-ant-…9999" },
         openai: { kind: "oauth" },
     },
-    settings: { balance: "tokens", cooldown: 10, recover: 0, notify: true },
+    settings: {
+        balance: "tokens",
+        period: "month",
+        margin: 25,
+        cooldown: 10,
+        recover: 0,
+        notify: true,
+    },
     at: 1,
 };
 
@@ -220,6 +231,11 @@ test("an open row draws its keys, its mode, and the form for the next key", () =
     assert.match(text, /sk-ant-…9999/u);
     assert.match(text, /Take it into the pool/u);
     assert.match(text, /goes out in its place/u);
+    // The balanced mode gives each key a share, and says what it carried in the window.
+    assert.match(text, /Share/u);
+    assert.match(text, /this month/u);
+    assert.match(text, /1\.5k tokens/u);
+    assert.match(text, /lighter by 25%/u);
 });
 
 test("the row shows a hint of Pi's key beside its other pills", () => {

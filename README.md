@@ -121,15 +121,28 @@ list order, wrapping at the end, and it skips keys that are used up or resting.
 
 ### Balanced
 
-    new session  ──► the key that carried the least ──► kept for that session
-    new subagent ──► the key that carried the least ──► kept for that subagent
+    new session  ──► the key that carries the least for its share ──► kept while it works
+    new subagent ──► the key that carries the least for its share ──► kept while it works
 
-A new conversation takes the lightest key at its first request and keeps it while it works: a swap in the middle of
-a session throws away the provider's prompt cache, which costs more than the imbalance. A conversation that the pool
-forgets (after 30 days, or beyond the newest 300) takes a new key when it comes back.
+Four things decide it:
 
-The weight is tokens (input, output, and cache) by default. **Menu → Extensions → API key pools** can count requests
-or cost instead.
+1. **A window, not a lifetime.** The pool evens out what each key carried _this month_ (or this day, or its whole life
+   if you say so). A monthly quota comes back, so last month's spend does not weigh on this one.
+2. **A share per key.** A key with share 2 takes twice the work of share 1: a $50 account beside a $5 one should carry
+   ten times as much, not the same. Share 1 everywhere is an even split.
+3. **A margin.** Another key takes over only when it is lighter by the margin (25% by default). Every switch costs the
+   provider's prompt cache, so a small gain is not worth it.
+4. **Quiet moments only.** The key in force never changes while another conversation of the same provider has a request
+   in flight: Pi reads the key when a request starts, so switching then would send one request with the wrong key. The
+   switch waits for the next request that starts alone.
+
+A conversation keeps its key while that key works, however heavy it gets: a swap in the middle of a session throws
+away the prompt cache. Usage is booked to the key that really carried each request, so a request that went out in a
+shared moment does not distort the counts. A conversation the pool forgets (after 30 days, or beyond the newest 300)
+takes a new key when it comes back.
+
+The metric is **cost**, from Pi's own prices, which is the closest thing to a quota; a model with no price falls back
+to tokens (input, output, and cache). **Menu → Extensions → API key pools** can count tokens or requests instead.
 
 ### What counts as used up
 
@@ -149,12 +162,14 @@ monthly quota a second chance.
 
 **Menu → Extensions → API key pools**:
 
-| Setting                                                  | Default   | What it does                               |
-| -------------------------------------------------------- | --------- | ------------------------------------------ |
-| Tell me when a key is used up, or when a pool switches   | on        | a notice in the app                        |
-| What the balanced mode evens out                         | tokens    | tokens, requests, or cost                  |
-| Minutes a key rests after the provider asks to slow down | 10        | 0 puts it straight back to work            |
-| Hours until a used-up key is tried again                 | 0 (never) | for quotas that come back, such as a month |
+| Setting                                                  | Default   | What it does                                                 |
+| -------------------------------------------------------- | --------- | ------------------------------------------------------------ |
+| Tell me when a key is used up, or when a pool switches   | on        | a notice in the app                                          |
+| What the balanced mode evens out                         | cost      | cost (tokens when a model has no price), tokens, or requests |
+| The balanced mode starts again                           | monthly   | each month, each day, or never                               |
+| Switch keys only when another is lighter by              | 25%       | any gain, 10%, 25%, or 50%                                   |
+| Minutes a key rests after the provider asks to slow down | 10        | 0 puts it straight back to work                              |
+| Hours until a used-up key is tried again                 | 0 (never) | for quotas that come back, such as a month                   |
 
 ## Limits
 
