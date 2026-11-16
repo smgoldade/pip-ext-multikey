@@ -70,10 +70,20 @@ The list has three groups, like Providers has its own:
 - **Signed in in Pi**: a provider that has a sign-in in Menu → Providers and no pool.
 - **Other providers**: everything else that Pi lists.
 
-A row says a provider's model count and id, then **opens in place**, as a row in Providers opens its sign-in: the
-same row holds the pool's mode, its keys with their buttons, and the form that adds the next key. **Another
-provider** at the end works the same way, for an id that Pi does not list yet; a custom endpoint gets its id from
+The page is laid out like Menu → Providers, without its Subagent models column: the same search box, the same group
+headings with their counts, and the same bordered list of rows. A row says the provider's name and its pills
+(`signed in`, `2 keys`, `balanced`), then its model count and id, and a button on the right — **Add key**, or
+**Keys** when it has a pool.
+
+That button opens the row's **panel under it**, with the same tint and slide as a provider's sign-in in Providers. The
+panel holds the pool's mode, its keys with their buttons, the form for the next key, and Remove the pool. **Another
+provider** is a group of its own at the end, for an id that Pi does not list yet; a custom endpoint gets its id from
 Menu → Providers, under its OpenAI Compatible row.
+
+Those parts draw with Pi Pocket's own class names (`search`, `provider-group`, `sheet-list`, `provider`,
+`provider-panel`, …), so the page follows the theme, the phone layout, and the sheet's width. The module's own
+stylesheet covers only what is new: the pills, the key rows, and the form. If a Pi Pocket update renames those
+classes, the page keeps working and loses only their look.
 
 Pi's list arrives with Pi's next request: the module reads it from the model runtime, which it can reach only while
 a request runs. Until then the list holds the providers it learned another way (Pi's sign-ins and catalogs on disk),

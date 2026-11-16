@@ -1,120 +1,28 @@
-/* The providers-and-pools page: rows like Menu → Providers, each opening in place to its keys. Colours come from the
-   theme, so the page follows Appearance. */
+/*
+ * The API key pools page borrows the shape of Menu → Providers: its search box, its groups, its bordered rows, and
+ * the panel under a row. Pi Pocket's own stylesheet draws those (search, provider-group, provider, sheet-list,
+ * provider-panel, …), so this file styles only what is new: the pills, the keys, and the form. Colours come from the
+ * theme, and none of these names touch a core element.
+ */
 
-.mk-page {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+/* The page has the app's own padding; only its width is kept to the width of the Providers sheet. */
+.mk-main {
     max-width: 760px;
-    padding: 12px;
 }
 
-.mk-search {
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.mk-input {
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--bg);
-    color: var(--text);
-    font: inherit;
-    box-sizing: border-box;
-}
-
-.mk-group {
-    display: flex;
-    flex-direction: column;
-}
-
-.mk-group-title {
-    padding: 10px 2px 4px;
+.mk-pill {
+    padding: 1px 7px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-pill, 999px);
     color: var(--muted);
-    font-size: 12px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-.mk-entry {
-    display: flex;
-    flex-direction: column;
-    border-bottom: 1px solid var(--line);
-}
-
-.mk-item {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 10px 2px;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.mk-item:hover,
-.mk-item.open {
-    background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-
-.mk-item.open {
-    border-radius: 8px 8px 0 0;
-}
-
-.mk-item-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.mk-item-name {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
+    font-size: 11.5px;
     font-weight: 500;
+    white-space: nowrap;
 }
 
-.mk-item-side {
-    display: flex;
-    flex-shrink: 0;
-    gap: 8px;
-    align-items: center;
-}
-
-.mk-caret {
-    color: var(--muted);
-    font-size: 12px;
-}
-
-.mk-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid var(--line);
-    border-radius: 0 0 8px 8px;
-    background: var(--card);
-}
-
-.mk-add {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-}
-
-.mk-add .mk-input {
-    flex: 1 1 160px;
-    min-width: 0;
+.mk-pill.on {
+    border-color: var(--accent-line);
+    color: var(--accent);
 }
 
 .mk-head {
@@ -122,6 +30,7 @@
     gap: 8px;
     align-items: center;
     justify-content: space-between;
+    margin-bottom: 6px;
     font-weight: 600;
 }
 
@@ -135,48 +44,24 @@
 }
 
 .mk-mode.on {
-    border-color: var(--accent);
+    border-color: var(--accent-line);
     color: var(--accent);
     opacity: 1;
-}
-
-.mk-tag {
-    padding: 1px 7px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    color: var(--muted);
-    font-size: 11px;
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.mk-tag.on {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.mk-tag.bad {
-    border-color: var(--err);
-    color: var(--err);
-}
-
-.mk-tag.warn {
-    border-color: var(--warn);
-    color: var(--warn);
 }
 
 .mk-row {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    padding: 8px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-card, 10px);
     background: var(--bg);
 }
 
 .mk-row.on {
-    border-color: var(--accent);
+    border-color: var(--accent-line);
 }
 
 .mk-line {
@@ -195,8 +80,57 @@
     font-weight: 600;
 }
 
+.mk-tag {
+    padding: 1px 7px;
+    border: 1px solid var(--hair);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.mk-tag.on {
+    border-color: var(--accent-line);
+    color: var(--accent);
+}
+
+.mk-tag.bad {
+    border-color: var(--err);
+    color: var(--err);
+}
+
+.mk-tag.warn {
+    border-color: var(--warn);
+    color: var(--warn);
+}
+
 .mk-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+}
+
+.mk-add {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 8px 0;
+}
+
+.mk-input {
+    flex: 1 1 150px;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--hair);
+    border-radius: var(--r-control, 8px);
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    box-sizing: border-box;
+}
+
+.mk-input:focus-visible {
+    border-color: var(--accent-line);
 }

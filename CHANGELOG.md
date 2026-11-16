@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.0
+
+- **The page now uses Menu → Providers' own layout**: the same search box, the same group headings with their counts,
+  and the same bordered list of rows. Each row is a provider with its name and pills, its model count and id, and a
+  button on the right (**Add key**, or **Keys**), like the **API key** button there.
+- A row's panel opens under it with the same tint and slide as a provider's sign-in in Providers, and holds the mode,
+  the keys, the form for the next key, and Remove the pool. The Subagent models column is not there, as asked.
+- The page draws with Pi Pocket's classes for those parts (search, provider-group, sheet-list, provider,
+  provider-panel), so it follows the theme and the phone layout of the real sheet. This module's stylesheet now
+  covers only what is new: the pills, the key rows, and the form.
+
 ## 1.3.0
 
 - **A pool's key now goes out in place of Pi's own API key.** Pi resolves a stored sign-in before a registration, so

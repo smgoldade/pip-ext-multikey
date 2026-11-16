@@ -150,6 +150,22 @@ test("the list draws every group and the row of a pool", () => {
     assert.match(text, /Another provider/u);
 });
 
+test("a row is the provider, its pills, and one button, as in Providers", () => {
+    const registered = run([view, null, null, "", null, "", "", ""]);
+    const text = String(registered["page"]?.[0]?.component());
+
+    assert.match(text, /provider-item/u);
+    assert.match(text, /provider-info/u);
+    assert.match(text, /provider-name/u);
+    assert.match(text, /provider-actions/u);
+    assert.match(text, /sheet-list/u);
+    assert.match(text, /provider-group-head/u);
+    assert.match(text, /class="search"/u);
+    // A provider with a pool says "Keys"; one with no pool says "Add key".
+    assert.match(text, />\s*Keys\s*</u);
+    assert.match(text, />\s*Add key\s*</u);
+});
+
 test("a provider that is not listed yet still fills the page", () => {
     const registered = run([
         {
